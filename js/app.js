@@ -1,541 +1,465 @@
-```js
-// ============================================================
-// CORE APPLICATION
-// Navigation, Toast, Loading, Data, Authentication
-// ============================================================
+// app.js
+// Model ERP — Application Core
+// New Firebase SDK + New Authentication
+// Admin-only ERP access
 
 import {
-  initializeApp,
-  getApps,
-  getApp
-} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+    initializeApp,
+    getApps,
+    getApp
+} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
 
 import {
-  getDatabase,
-  ref,
-  get
-} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
+    getAuth,
+    onAuthStateChanged,
+    signOut
+} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
 
-import {
-  getAuth,
-  onAuthStateChanged,
-  signOut
-} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 
 // ============================================================
-// FIREBASE CONFIG
+// FIREBASE CONFIGURATION
 // ============================================================
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCbD7nHFYAKJHVe9eV_JL1A0qHQw",
-  authDomain: "modelerp-c7ff7.firebaseapp.com",
-  databaseURL: "https://modelerp-c7ff7-default-rtdb.firebaseio.com",
-  projectId: "modelerp-c7ff7",
-  storageBucket: "modelerp-c7ff7.firebasestorage.app",
-  messagingSenderId: "808804437563",
-  appId: "1:808804437563:web:37083674d5b6acdbe8161e",
-  measurementId: "G-KT82WYLM0J"
+    apiKey: "AIzaSyCbD7nHFYAKJHVe9eV_JL1A0qHQw",
+    authDomain: "modelerp-c7ff7.firebaseapp.com",
+    databaseURL: "https://modelerp-c7ff7-default-rtdb.firebaseio.com",
+    projectId: "modelerp-c7ff7",
+    storageBucket: "modelerp-c7ff7.firebasestorage.app",
+    messagingSenderId: "808804437563",
+    appId: "1:808804437563:web:37083674d5b6acdbe8161e",
+    measurementId: "G-KT82WYLM0J"
 };
+
+
+// ============================================================
+// ADMIN UID
+// ============================================================
 
 const ADMIN_USER_UID = "089prHaZ5shgPvvaMsl1dgMe6Yx1";
 
-const app = getApps().length
-  ? getApp()
-  : initializeApp(firebaseConfig);
 
-const db = getDatabase(app);
+// ============================================================
+// FIREBASE INITIALIZATION
+// ============================================================
+
+const app = getApps().length
+    ? getApp()
+    : initializeApp(firebaseConfig);
+
 const auth = getAuth(app);
 
-// ============================================================
-// DOM REFS
-// ============================================================
-
-const sidebar = document.getElementById("sidebar");
-const overlay = document.getElementById("overlay");
-const menuToggle = document.getElementById("menuToggle");
-const sidebarClose = document.getElementById("sidebarClose");
-const pageTitle = document.getElementById("pageTitle");
-
-const toastContainer =
-  document.getElementById("toastContainer");
-
-const loadingOverlay =
-  document.getElementById("loadingOverlay");
-
-const notificationBtn =
-  document.getElementById("notificationBtn");
-
-const badgeDot =
-  document.querySelector(".badge-dot");
-
-const logoutBtn =
-  document.getElementById("logoutBtn");
-
-let currentPage = "dashboard";
 
 // ============================================================
-// TOAST & LOADING
+// AUTH STATE
 // ============================================================
 
-function showLoading(show = true) {
-  if (!loadingOverlay) return;
+let currentAdmin = null;
+let authReady = false;
 
-  loadingOverlay.classList.toggle("active", Boolean(show));
+let authReadyPromiseResolve;
+
+const authReadyPromise = new Promise((resolve) => {
+    authReadyPromiseResolve = resolve;
+});
+
+
+onAuthStateChanged(auth, async (user) => {
+
+    if (!user) {
+
+        currentAdmin = null;
+        authReady = true;
+
+        authReadyPromiseResolve(null);
+
+        return;
+    }
+
+
+    // --------------------------------------------------------
+    // ADMIN UID VERIFICATION
+    // --------------------------------------------------------
+
+    if (user.uid !== ADMIN_USER_UID) {
+
+        currentAdmin = null;
+
+        try {
+            await signOut(auth);
+        } catch (error) {
+            console.error(
+                "Unauthorized user sign-out failed:",
+                error
+            );
+        }
+
+        authReady = true;
+
+        authReadyPromiseResolve(null);
+
+        return;
+    }
+
+
+    // --------------------------------------------------------
+    // AUTHORIZED ADMIN
+    // --------------------------------------------------------
+
+    currentAdmin = user;
+    authReady = true;
+
+    authReadyPromiseResolve(user);
+});
+
+
+// ============================================================
+// WAIT FOR AUTHENTICATION STATE
+// ============================================================
+
+async function waitForAuth(timeout = 10000) {
+
+    if (authReady) {
+        return currentAdmin;
+    }
+
+    return Promise.race([
+        authReadyPromise,
+
+        new Promise((resolve) => {
+            setTimeout(() => {
+                resolve(null);
+            }, timeout);
+        })
+    ]);
 }
 
-function showToast(message, type = "info") {
-  if (!toastContainer) return;
 
-  const toast = document.createElement("div");
+// ============================================================
+// GET CURRENT ADMIN
+// ============================================================
 
-  toast.className = `toast toast-${type}`;
-  toast.textContent = message;
+function getCurrentAdmin() {
 
-  toastContainer.appendChild(toast);
+    const user = auth.currentUser;
 
-  setTimeout(() => {
-    toast.style.opacity = "0";
-    toast.style.transform = "translateX(20px)";
+    if (
+        !user ||
+        user.uid !== ADMIN_USER_UID
+    ) {
+        return null;
+    }
 
-    setTimeout(() => {
-      toast.remove();
-    }, 300);
-  }, 3500);
+    return user;
 }
 
-// ============================================================
-// MODAL SUPPORT
-// ============================================================
-// Modal support is retained for VIEW/CONFIRM dialogs.
-// Add/New forms must use dedicated pages.
-// ============================================================
-
-function openModal(title, bodyHTML, confirmText = "Confirm", callback) {
-  const modalOverlay = document.getElementById("modalOverlay");
-  const modalTitle = document.getElementById("modalTitle");
-  const modalBody = document.getElementById("modalBody");
-  const modalConfirm = document.getElementById("modalConfirm");
-
-  if (!modalOverlay || !modalTitle || !modalBody) return;
-
-  modalTitle.textContent = title;
-  modalBody.innerHTML = bodyHTML;
-
-  if (modalConfirm) {
-    modalConfirm.textContent = confirmText;
-  }
-
-  window.__modalCallback =
-    typeof callback === "function" ? callback : null;
-
-  modalOverlay.classList.add("active");
-}
-
-function closeModal() {
-  const modalOverlay =
-    document.getElementById("modalOverlay");
-
-  if (modalOverlay) {
-    modalOverlay.classList.remove("active");
-  }
-
-  window.__modalCallback = null;
-}
 
 // ============================================================
-// NAVIGATION
+// AUTHENTICATION STATUS
 // ============================================================
 
-function navigateTo(page) {
-  currentPage = page;
+function isAdminAuthenticated() {
 
-  document.querySelectorAll(".nav-link").forEach(link => {
-    link.classList.toggle(
-      "active",
-      link.dataset.page === page
+    const user = auth.currentUser;
+
+    return !!(
+        user &&
+        user.uid === ADMIN_USER_UID
     );
-  });
-
-  document.querySelectorAll(".page-section").forEach(section => {
-    section.classList.remove("active");
-  });
-
-  const target =
-    document.getElementById(`page-${page}`);
-
-  if (target) {
-    target.classList.add("active");
-  }
-
-  const titles = {
-    dashboard: "Dashboard",
-    students: "Students",
-    teachers: "Teachers & Staff",
-    fees: "Fee Management",
-    salary: "Salary",
-    analytics: "Reports & Analytics",
-    attendance: "Attendance"
-  };
-
-  const title = titles[page] || "Dashboard";
-
-  if (pageTitle) {
-    pageTitle.textContent = title;
-  }
-
-  document.title = `SchoolERP | ${title}`;
-
-  switch (page) {
-    case "dashboard":
-      if (window.renderDashboard) {
-        window.renderDashboard();
-      }
-      break;
-
-    case "students":
-      if (window.renderStudents) {
-        window.renderStudents();
-      }
-      break;
-
-    case "teachers":
-      if (window.renderStaff) {
-        window.renderStaff();
-      }
-      break;
-
-    case "fees":
-      if (window.renderFees) {
-        window.renderFees();
-      }
-
-      if (window.initFeeModule) {
-        window.initFeeModule();
-      }
-      break;
-
-    case "salary":
-      if (window.renderSalary) {
-        window.renderSalary();
-      }
-      break;
-
-    case "analytics":
-      if (window.renderAnalytics) {
-        window.renderAnalytics();
-      }
-      break;
-
-    case "attendance":
-      if (window.renderAttendance) {
-        window.renderAttendance();
-      }
-      break;
-
-    default:
-      break;
-  }
-
-  if (window.innerWidth < 1024) {
-    sidebar?.classList.remove("open");
-    overlay?.classList.remove("active");
-  }
 }
 
+
 // ============================================================
-// SIDEBAR EVENTS
+// PROTECT ADMIN PAGES
 // ============================================================
 
-menuToggle?.addEventListener("click", () => {
-  sidebar?.classList.toggle("open");
-  overlay?.classList.toggle("active");
-});
+async function protectAdminPage(
+    loginPage = "login.html"
+) {
 
-sidebarClose?.addEventListener("click", () => {
-  sidebar?.classList.remove("open");
-  overlay?.classList.remove("active");
-});
+    const user = await waitForAuth();
 
-overlay?.addEventListener("click", () => {
-  sidebar?.classList.remove("open");
-  overlay?.classList.remove("active");
-});
+    if (
+        !user ||
+        user.uid !== ADMIN_USER_UID
+    ) {
 
-document.querySelectorAll(".nav-link").forEach(link => {
-  link.addEventListener("click", event => {
-    event.preventDefault();
+        const currentPage =
+            window.location.pathname
+                .split("/")
+                .pop();
 
-    const page = link.dataset.page;
+        if (currentPage !== loginPage) {
+            window.location.href = loginPage;
+        }
 
-    if (page) {
-      navigateTo(page);
+        return false;
     }
-  });
-});
 
-// ============================================================
-// MODAL EVENTS
-// ============================================================
-
-document
-  .getElementById("modalClose")
-  ?.addEventListener("click", closeModal);
-
-document
-  .getElementById("modalCancel")
-  ?.addEventListener("click", closeModal);
-
-document
-  .getElementById("modalOverlay")
-  ?.addEventListener("click", event => {
-    if (event.target === event.currentTarget) {
-      closeModal();
-    }
-  });
-
-document
-  .getElementById("modalConfirm")
-  ?.addEventListener("click", () => {
-    if (typeof window.__modalCallback === "function") {
-      window.__modalCallback();
-    }
-  });
-
-// ============================================================
-// NOTIFICATION
-// ============================================================
-
-if (notificationBtn) {
-  notificationBtn.addEventListener("click", () => {
-    showToast("No new notifications", "info");
-  });
+    return true;
 }
 
-if (badgeDot) {
-  badgeDot.style.display = "none";
+
+// ============================================================
+// REDIRECT TO LOGIN
+// ============================================================
+
+function redirectToLogin(
+    loginPage = "login.html"
+) {
+
+    window.location.href = loginPage;
 }
+
 
 // ============================================================
 // LOGOUT
 // ============================================================
 
 async function logoutAdmin() {
-  await signOut(auth);
-  localStorage.removeItem("adminSession");
-}
 
-if (logoutBtn) {
-  logoutBtn.addEventListener("click", async () => {
     try {
-      showLoading(true);
 
-      await logoutAdmin();
+        await signOut(auth);
 
-      showLoading(false);
+        currentAdmin = null;
 
-      showToast(
-        "Logged out successfully.",
-        "success"
-      );
-
-      setTimeout(() => {
-        window.location.href = "index.html";
-      }, 500);
+        window.location.href = "login.html";
 
     } catch (error) {
-      console.error("Logout error:", error);
 
-      showLoading(false);
-
-      showToast(
-        "Logout failed. Please try again.",
-        "error"
-      );
-    }
-  });
-}
-
-// ============================================================
-// GLOBAL DATA STORES
-// ============================================================
-
-window.STUDENTS = [];
-window.TEACHERS = [];
-window.FEE_RECORDS = [];
-window.SALARY_RECORDS = [];
-window.PAYMENTS = [];
-window.ACTIVITIES = [];
-
-// ============================================================
-// FIREBASE DATA READER
-// ============================================================
-
-async function readData(path) {
-  const snapshot = await get(ref(db, path));
-
-  if (!snapshot.exists()) {
-    return [];
-  }
-
-  const data = snapshot.val();
-
-  return Object.entries(data).map(([id, value]) => ({
-    id,
-    ...(value || {})
-  }));
-}
-
-// ============================================================
-// LOAD ALL DATA
-// ============================================================
-
-async function loadAllData() {
-  try {
-    const [
-      students,
-      teachers,
-      fees,
-      salary,
-      payments,
-      activities
-    ] = await Promise.all([
-      readData("students"),
-      readData("teachers"),
-      readData("feeRecords"),
-      readData("salaryRecords"),
-      readData("payments"),
-      readData("activities")
-    ]);
-
-    window.STUDENTS = students;
-    window.TEACHERS = teachers;
-    window.FEE_RECORDS = fees;
-    window.SALARY_RECORDS = salary;
-    window.PAYMENTS = payments;
-    window.ACTIVITIES = activities;
-
-    return {
-      students,
-      teachers,
-      fees,
-      salary,
-      payments,
-      activities
-    };
-
-  } catch (error) {
-    console.error(
-      "Error loading Firebase data:",
-      error
-    );
-
-    showToast(
-      "Error loading data from Firebase.",
-      "error"
-    );
-
-    return null;
-  }
-}
-
-// ============================================================
-// AUTHENTICATION CHECK
-// ============================================================
-
-function getCurrentAdmin() {
-  return new Promise(resolve => {
-    const unsubscribe = onAuthStateChanged(
-      auth,
-      user => {
-        unsubscribe();
-
-        if (
-          user &&
-          user.uid === ADMIN_USER_UID
-        ) {
-          resolve(user);
-        } else {
-          resolve(null);
-        }
-      },
-      error => {
         console.error(
-          "Authentication state error:",
-          error
+            "Logout failed:",
+            error
         );
 
-        unsubscribe();
-        resolve(null);
-      }
-    );
-  });
+        throw error;
+    }
 }
 
+
 // ============================================================
-// INIT
+// ACADEMIC YEAR
 // ============================================================
 
-document.addEventListener("DOMContentLoaded", async () => {
-  showLoading(true);
+function getAcademicYear() {
 
-  try {
-    const user = await getCurrentAdmin();
+    const now = new Date();
 
-    if (!user) {
-      console.warn(
-        "No authenticated admin user."
-      );
+    const year = now.getFullYear();
 
-      showLoading(false);
+    return `${year}-${year + 1}`;
+}
 
-      window.location.href = "index.html";
-      return;
+
+// ============================================================
+// NAVIGATION
+// ============================================================
+
+function navigateTo(page) {
+
+    if (!page) return;
+
+    window.location.href = page;
+}
+
+
+// ============================================================
+// DEDICATED ADD PAGE ROUTES
+// ============================================================
+
+function openAddStudentPage() {
+    navigateTo("add-student.html");
+}
+
+function openAddTeacherPage() {
+    navigateTo("add-teacher.html");
+}
+
+function openAddFeePage() {
+    navigateTo("add-fee.html");
+}
+
+function openCollectFeePage() {
+    navigateTo("collect-fee.html");
+}
+
+function openBulkFeePage() {
+    navigateTo("bulk-fee.html");
+}
+
+function openPayFeePage() {
+    navigateTo("pay-fee.html");
+}
+
+function openAddSalaryPage() {
+    navigateTo("add-salary.html");
+}
+
+
+// ============================================================
+// ACTIVE NAVIGATION
+// ============================================================
+
+function setActiveNavigation() {
+
+    const currentPage =
+        window.location.pathname
+            .split("/")
+            .pop()
+            .toLowerCase();
+
+    const navLinks =
+        document.querySelectorAll(
+            "[data-page]"
+        );
+
+    navLinks.forEach((link) => {
+
+        const target =
+            (link.dataset.page || "")
+                .split("/")
+                .pop()
+                .toLowerCase();
+
+        if (target === currentPage) {
+
+            link.classList.add("active");
+
+        } else {
+
+            link.classList.remove("active");
+        }
+    });
+}
+
+
+// ============================================================
+// LOGOUT BUTTON BINDING
+// ============================================================
+
+function bindLogoutButtons() {
+
+    const buttons =
+        document.querySelectorAll(
+            "[data-logout]"
+        );
+
+    buttons.forEach((button) => {
+
+        button.addEventListener(
+            "click",
+            async (event) => {
+
+                event.preventDefault();
+
+                try {
+                    await logoutAdmin();
+                } catch (error) {
+                    console.error(error);
+                }
+            }
+        );
+    });
+}
+
+
+// ============================================================
+// PAGE INITIALIZATION
+// ============================================================
+
+async function initializeAppPage() {
+
+    setActiveNavigation();
+    bindLogoutButtons();
+
+    const loginPage =
+        window.location.pathname
+            .split("/")
+            .pop()
+            .toLowerCase() === "login.html";
+
+    if (!loginPage) {
+        await protectAdminPage();
     }
+}
 
-    console.log(
-      "Authenticated admin:",
-      user.email
-    );
-
-    await loadAllData();
-
-    // Existing teacher migration support.
-    // Runs only when the teacher module provides it.
-    if (typeof window.migrateEmployeeIds === "function") {
-      await window.migrateEmployeeIds();
-    }
-
-    showLoading(false);
-
-    navigateTo("dashboard");
-
-  } catch (error) {
-    console.error(
-      "Application initialization failed:",
-      error
-    );
-
-    showLoading(false);
-
-    showToast(
-      "Unable to initialize the application.",
-      "error"
-    );
-  }
-});
 
 // ============================================================
-// EXPOSE GLOBAL FUNCTIONS
+// DOM READY
 // ============================================================
 
-window.showToast = showToast;
-window.showLoading = showLoading;
-window.openModal = openModal;
-window.closeModal = closeModal;
-window.navigateTo = navigateTo;
-window.loadAllData = loadAllData;
-window.getCurrentAdmin = getCurrentAdmin;
-window.logoutAdmin = logoutAdmin;
-window.db = db;
-window.auth = auth;
-```
+if (
+    document.readyState === "loading"
+) {
+
+    document.addEventListener(
+        "DOMContentLoaded",
+        initializeAppPage
+    );
+
+} else {
+
+    initializeAppPage();
+}
+
+
+// ============================================================
+// GLOBAL ACCESS
+// ============================================================
+
+window.firebaseApp = app;
+window.firebaseAuth = auth;
+
+window.ADMIN_USER_UID = ADMIN_USER_UID;
+
+window.currentAdmin = () =>
+    getCurrentAdmin();
+
+window.getCurrentAdmin =
+    getCurrentAdmin;
+
+window.isAdminAuthenticated =
+    isAdminAuthenticated;
+
+window.waitForAuth =
+    waitForAuth;
+
+window.protectAdminPage =
+    protectAdminPage;
+
+window.redirectToLogin =
+    redirectToLogin;
+
+window.logoutAdmin =
+    logoutAdmin;
+
+window.getAcademicYear =
+    getAcademicYear;
+
+window.navigateTo =
+    navigateTo;
+
+window.openAddStudentPage =
+    openAddStudentPage;
+
+window.openAddTeacherPage =
+    openAddTeacherPage;
+
+window.openAddFeePage =
+    openAddFeePage;
+
+window.openCollectFeePage =
+    openCollectFeePage;
+
+window.openBulkFeePage =
+    openBulkFeePage;
+
+window.openPayFeePage =
+    openPayFeePage;
+
+window.openAddSalaryPage =
+    openAddSalaryPage;
+
+window.setActiveNavigation =
+    setActiveNavigation;
