@@ -1,22 +1,27 @@
-```javascript
-// ============================================================
-// RECEIPT MODULE – Firebase SDK, Dynamic Institution Settings
-// Generate, Download PDF, Print, Reprint
-// ============================================================
+// receipt.js
+// Professional Fee / Payment Receipt
+// Uses the new Firebase SDK and current ERP configuration.
+// Institution details are loaded dynamically from Firebase Settings.
 
-import { initializeApp } from "firebase/app";
+import {
+  initializeApp,
+  getApps,
+  getApp
+} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+
 import {
   getDatabase,
   ref,
   get
-} from "firebase/database";
+} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
 
-// ============================================================
+
+// ======================================================
 // FIREBASE CONFIGURATION
-// ============================================================
+// ======================================================
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCbD7nHFYAKhJHeKawfzV9eV_JL1A0qHQw",
+  apiKey: "AIzaSyCbD7nHFYAKJHVe9eV_JL1A0qHQw",
   authDomain: "modelerp-c7ff7.firebaseapp.com",
   databaseURL: "https://modelerp-c7ff7-default-rtdb.firebaseio.com",
   projectId: "modelerp-c7ff7",
@@ -26,77 +31,36 @@ const firebaseConfig = {
   measurementId: "G-KT82WYLM0J"
 };
 
-const app = initializeApp(firebaseConfig);
+
+// ======================================================
+// FIREBASE INITIALIZATION
+// ======================================================
+
+const app = getApps().length
+  ? getApp()
+  : initializeApp(firebaseConfig);
+
 const db = getDatabase(app);
 
-// ============================================================
-// DEFAULT INSTITUTION INFORMATION
-// Admin Settings can override these values.
-// ============================================================
 
-const DEFAULT_INSTITUTION_INFO = {
+// ======================================================
+// DEFAULT INSTITUTION INFORMATION
+// ======================================================
+
+const DEFAULT_INSTITUTION = {
   name: "[Your Institution Name]",
   address: "[Your Institution Address]",
   code: "[Institution Code]",
   phone: "[Contact Number]",
   email: "[Institution Email]",
-  website: "[Institution Website]"
+  website: "[Institution Website]",
+  principalName: "[Principal Name]"
 };
 
-let INSTITUTION_INFO = {
-  ...DEFAULT_INSTITUTION_INFO
-};
 
-// ============================================================
-// LOAD INSTITUTION SETTINGS
-// ============================================================
-
-async function loadInstitutionInfo() {
-  try {
-    const possiblePaths = [
-      "settings/institution",
-      "institutionSettings",
-      "settings"
-    ];
-
-    for (const path of possiblePaths) {
-      const snapshot = await get(ref(db, path));
-
-      if (!snapshot.exists()) continue;
-
-      const data = snapshot.val();
-
-      INSTITUTION_INFO = {
-        ...DEFAULT_INSTITUTION_INFO,
-        ...(data.institution || {}),
-        ...(
-          path === "institutionSettings" ||
-          path === "settings"
-            ? data
-            : {}
-        )
-      };
-
-      break;
-    }
-
-    window.INSTITUTION_INFO = INSTITUTION_INFO;
-
-    return INSTITUTION_INFO;
-
-  } catch (error) {
-    console.error(
-      "Failed to load institution settings:",
-      error
-    );
-
-    return INSTITUTION_INFO;
-  }
-}
-
-// ============================================================
-// UTILITY
-// ============================================================
+// ======================================================
+// HELPERS
+// ======================================================
 
 function escapeHTML(value) {
   return String(value ?? "")
@@ -107,19 +71,8 @@ function escapeHTML(value) {
     .replace(/'/g, "&#039;");
 }
 
-// ============================================================
-// NUMBER TO WORDS – INDIAN NUMBERING
-// ============================================================
 
-function numberToWords(num) {
-  num = Number(num) || 0;
-
-  if (num === 0) {
-    return "Zero Rupees Only";
-  }
-
-  num = Math.floor(num);
-
+function numberToWords(number) {
   const ones = [
     "",
     "One",
@@ -156,1421 +109,857 @@ function numberToWords(num) {
     "Ninety"
   ];
 
-  function twoDigits(value) {
-    if (value < 20) {
-      return ones[value];
+  number = Math.floor(Number(number) || 0);
+
+  if (number === 0) return "Zero";
+
+  function convertLessThanThousand(num) {
+    let result = "";
+
+    if (num >= 100) {
+      result += ones[Math.floor(num / 100)] + " Hundred ";
+      num %= 100;
     }
 
-    return (
-      tens[Math.floor(value / 10)] +
-      (value % 10 ? ` ${ones[value % 10]}` : "")
-    );
-  }
-
-  function threeDigits(value) {
-    if (value < 100) {
-      return twoDigits(value);
+    if (num >= 20) {
+      result += tens[Math.floor(num / 10)] + " ";
+      num %= 10;
     }
 
-    return (
-      `${ones[Math.floor(value / 100)]} Hundred` +
-      (value % 100
-        ? ` ${twoDigits(value % 100)}`
-        : "")
-    );
+    if (num > 0) {
+      result += ones[num] + " ";
+    }
+
+    return result.trim();
   }
 
-  let words = "";
+  let result = "";
 
-  const crore = Math.floor(num / 10000000);
-  num %= 10000000;
-
-  const lakh = Math.floor(num / 100000);
-  num %= 100000;
-
-  const thousand = Math.floor(num / 1000);
-  num %= 1000;
-
-  const hundred = num;
-
-  if (crore) {
-    words += `${threeDigits(crore)} Crore `;
+  if (number >= 10000000) {
+    result += convertLessThanThousand(
+      Math.floor(number / 10000000)
+    ) + " Crore ";
+    number %= 10000000;
   }
 
-  if (lakh) {
-    words += `${threeDigits(lakh)} Lakh `;
+  if (number >= 100000) {
+    result += convertLessThanThousand(
+      Math.floor(number / 100000)
+    ) + " Lakh ";
+    number %= 100000;
   }
 
-  if (thousand) {
-    words += `${threeDigits(thousand)} Thousand `;
+  if (number >= 1000) {
+    result += convertLessThanThousand(
+      Math.floor(number / 1000)
+    ) + " Thousand ";
+    number %= 1000;
   }
 
-  if (hundred) {
-    words += `${threeDigits(hundred)} `;
+  if (number > 0) {
+    result += convertLessThanThousand(number);
   }
 
-  return `${words.trim()} Rupees Only`;
+  return result.trim() + " Rupees Only";
 }
 
-// ============================================================
-// GET ACADEMIC YEAR
-// ============================================================
 
 function getAcademicYear() {
-  return (
-    window.ACADEMIC_YEAR ||
+  const yearElement =
+    document.querySelector("[data-academic-year]") ||
+    document.getElementById("academicYear");
+
+  return yearElement?.textContent?.trim() ||
     localStorage.getItem("academicYear") ||
-    "[Academic Year]"
-  );
+    "[Academic Year]";
 }
 
-// ============================================================
-// GET FEE RECORD
-// ============================================================
 
-function getFeeRecord(id) {
-  const records = window.FEE_RECORDS || [];
+// ======================================================
+// LOAD INSTITUTION SETTINGS
+// ======================================================
 
-  return records.find(
-    record => String(record.id) === String(id)
-  );
-}
+async function loadInstitutionSettings() {
+  const possiblePaths = [
+    "settings/institution",
+    "institutionSettings",
+    "settings"
+  ];
 
-// ============================================================
-// GET STUDENT
-// ============================================================
+  for (const path of possiblePaths) {
+    try {
+      const snapshot = await get(ref(db, path));
 
-function getStudent(studentId) {
-  const students = window.STUDENTS || [];
+      if (snapshot.exists()) {
+        const data = snapshot.val() || {};
 
-  return students.find(
-    student =>
-      String(student.id) === String(studentId)
-  );
-}
-
-// ============================================================
-// GET PAYMENT
-// ============================================================
-
-function getPaymentForFee(fee, student) {
-  const payments = window.PAYMENTS || [];
-
-  return payments.find(payment =>
-    String(payment.studentId) === String(student.id) &&
-    Number(payment.amount) === Number(fee.amount) &&
-    payment.status === fee.status
-  );
-}
-
-// ============================================================
-// RECEIPT DATA
-// ============================================================
-
-function prepareFeeReceiptData(fee) {
-  const student = getStudent(fee.studentId);
-
-  if (!student) {
-    return null;
+        return {
+          ...DEFAULT_INSTITUTION,
+          ...data
+        };
+      }
+    } catch (error) {
+      console.warn(
+        `Unable to load institution settings from ${path}`,
+        error
+      );
+    }
   }
 
-  const payment =
-    getPaymentForFee(fee, student);
-
   return {
-    fee,
-    student,
-    payment,
-
-    receiptNumber:
-      fee.receiptNo ||
-      `RCP-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`,
-
-    date:
-      new Date().toLocaleDateString(
-        "en-IN",
-        {
-          day: "2-digit",
-          month: "short",
-          year: "numeric"
-        }
-      ),
-
-    paymentMethod:
-      payment?.method ||
-      fee.paymentMethod ||
-      "N/A",
-
-    academicYear:
-      fee.academicYear ||
-      getAcademicYear(),
-
-    amount:
-      Number(fee.amount) || 0,
-
-    paid:
-      Number(fee.paid) || 0,
-
-    pending:
-      Number(fee.pending) || 0
+    ...DEFAULT_INSTITUTION
   };
 }
 
-// ============================================================
-// SHOW FEE RECEIPT
-// ============================================================
 
-async function showReceipt(id) {
-  await loadInstitutionInfo();
+// ======================================================
+// FIND RECORD
+// ======================================================
 
-  const fee = getFeeRecord(id);
+function findRecord(id, collections = []) {
+  for (const collection of collections) {
+    const records = window[collection];
 
-  if (!fee) {
-    window.showToast(
-      "Fee record not found",
-      "error"
+    if (!Array.isArray(records)) continue;
+
+    const found = records.find(
+      item =>
+        String(item.id) === String(id) ||
+        String(item.key) === String(id)
     );
-    return;
+
+    if (found) return found;
   }
 
-  const data =
-    prepareFeeReceiptData(fee);
+  return null;
+}
 
-  if (!data) {
-    window.showToast(
-      "Student not found",
-      "error"
-    );
-    return;
-  }
 
-  const {
-    student,
-    receiptNumber,
-    date,
-    paymentMethod,
-    academicYear,
-    amount,
-    paid,
-    pending
-  } = data;
+// ======================================================
+// BUILD RECEIPT HTML
+// ======================================================
 
-  const statusClass =
-    fee.status === "paid"
-      ? "status-paid"
-      : fee.status === "pending"
-        ? "status-pending"
-        : "status-overdue";
+function buildReceiptHTML(receipt, student, institution) {
+  const amount = Number(
+    receipt.amount ??
+    receipt.paidAmount ??
+    receipt.totalAmount ??
+    0
+  );
 
-  const receiptHTML = `
-    <div
-      class="receipt-wrapper"
-      id="receiptContent"
-    >
+  const receiptNumber =
+    receipt.receiptNumber ||
+    receipt.receiptNo ||
+    receipt.id ||
+    "[Receipt Number]";
 
-      <div class="school-header">
+  const date =
+    receipt.date ||
+    receipt.paymentDate ||
+    receipt.createdAt
+      ? new Date(
+          receipt.date ||
+          receipt.paymentDate ||
+          receipt.createdAt
+        ).toLocaleDateString("en-IN")
+      : "[Date]";
 
-        <h2 class="school-name">
-          ${escapeHTML(INSTITUTION_INFO.name)}
-        </h2>
+  const enrollmentId =
+    student?.enrollmentId ||
+    receipt.enrollmentId ||
+    "[Enrollment ID]";
 
-        <p class="school-address">
-          ${escapeHTML(INSTITUTION_INFO.address)}
-        </p>
+  const studentName =
+    student?.name ||
+    receipt.studentName ||
+    "[Student Name]";
 
-        <p class="school-contact">
-          <strong>Institution Code:</strong>
-          ${escapeHTML(INSTITUTION_INFO.code)}
-          &nbsp;|&nbsp;
+  const className =
+    student?.class ||
+    receipt.class ||
+    "[Class]";
 
-          <strong>Phone:</strong>
-          ${escapeHTML(INSTITUTION_INFO.phone)}
-          &nbsp;|&nbsp;
+  const section =
+    student?.section ||
+    receipt.section ||
+    "[Section]";
 
-          <strong>Email:</strong>
-          ${escapeHTML(INSTITUTION_INFO.email)}
-          &nbsp;|&nbsp;
+  const paymentMode =
+    receipt.paymentMode ||
+    receipt.mode ||
+    "[Payment Mode]";
 
-          <strong>Web:</strong>
-          ${escapeHTML(INSTITUTION_INFO.website)}
-        </p>
+  const feeType =
+    receipt.feeType ||
+    receipt.type ||
+    "School Fee";
 
-      </div>
+  return `
+    <div class="official-receipt">
 
-      <div class="receipt-title">
+      <div class="receipt-header">
 
-        <h3>Fee Receipt</h3>
-
-        <span class="receipt-number">
-          # ${escapeHTML(receiptNumber)}
-        </span>
-
-      </div>
-
-      <div
-        style="
-          display:flex;
-          justify-content:space-between;
-          font-size:0.85rem;
-          margin-bottom:0.75rem;
-        "
-      >
-
-        <span>
-          <strong>Date:</strong>
-          ${escapeHTML(date)}
-        </span>
-
-        <span>
-          <strong>Academic Year:</strong>
-          ${escapeHTML(academicYear)}
-        </span>
-
-      </div>
-
-      <div
-        style="
-          display:grid;
-          grid-template-columns:1fr 1fr;
-          gap:0.3rem 1rem;
-          background:#f8fafc;
-          padding:0.75rem 1rem;
-          border-radius:5px;
-          margin-bottom:0.75rem;
-          font-size:0.85rem;
-        "
-      >
-
-        <div>
-          <strong>Student:</strong>
-          ${escapeHTML(student.name)}
+        <div class="institution-name">
+          ${escapeHTML(institution.name)}
         </div>
 
-        <div>
-          <strong>Class:</strong>
-          ${escapeHTML(
-            `${student.class || ""}${student.section || ""}`
-          )}
+        <div class="institution-address">
+          ${escapeHTML(institution.address)}
         </div>
 
-        <div>
-          <strong>Roll No:</strong>
-          ${escapeHTML(student.roll || "N/A")}
+        <div class="institution-contact">
+          ${escapeHTML(institution.phone)}
+          ${institution.email ? ` | ${escapeHTML(institution.email)}` : ""}
         </div>
 
-        <div>
-          <strong>Admission No:</strong>
-          ${escapeHTML(
-            student.admissionNo || "N/A"
-          )}
-        </div>
-
-        <div>
-          <strong>Guardian:</strong>
-          ${escapeHTML(
-            student.guardian || "N/A"
-          )}
-        </div>
-
-        <div>
-          <strong>Fee Type:</strong>
-          ${escapeHTML(
-            fee.feeType || "N/A"
-          )}
+        <div class="receipt-title">
+          FEE RECEIPT
         </div>
 
       </div>
 
-      <div class="receipt-details-grid">
+
+      <div class="receipt-meta">
 
         <div>
-          <strong>Amount:</strong>
-          ₹${amount.toLocaleString("en-IN")}
+          <strong>Receipt No.</strong>
+          <span>${escapeHTML(receiptNumber)}</span>
         </div>
 
         <div>
-          <strong>Paid:</strong>
-          ₹${paid.toLocaleString("en-IN")}
+          <strong>Date</strong>
+          <span>${escapeHTML(date)}</span>
         </div>
 
         <div>
-          <strong>Pending:</strong>
-          ₹${pending.toLocaleString("en-IN")}
-        </div>
-
-        <div>
-          <strong>Status:</strong>
-          <span class="status-badge ${statusClass}">
-            ${escapeHTML(fee.status || "N/A")}
-          </span>
-        </div>
-
-        <div>
-          <strong>Payment Method:</strong>
-          ${escapeHTML(paymentMethod)}
-        </div>
-
-        <div>
-          <strong>Amount in Words:</strong>
-          ${escapeHTML(numberToWords(amount))}
+          <strong>Academic Year</strong>
+          <span>${escapeHTML(getAcademicYear())}</span>
         </div>
 
       </div>
 
-      <div
-        class="receipt-signatures"
-        style="
-          display:grid;
-          grid-template-columns:1fr 1fr 1fr;
-          gap:1rem;
-          margin-top:2.5rem;
-          text-align:center;
-        "
-      >
 
-        <div>
-          <div
-            style="
-              border-top:1px solid #222;
-              padding-top:0.4rem;
-            "
-          >
-            Student/Guardian Signature
-          </div>
+      <table class="receipt-table">
+
+        <tr>
+          <th>Enrollment ID</th>
+          <td>${escapeHTML(enrollmentId)}</td>
+        </tr>
+
+        <tr>
+          <th>Student Name</th>
+          <td>${escapeHTML(studentName)}</td>
+        </tr>
+
+        <tr>
+          <th>Class</th>
+          <td>${escapeHTML(className)}</td>
+        </tr>
+
+        <tr>
+          <th>Section</th>
+          <td>${escapeHTML(section)}</td>
+        </tr>
+
+        <tr>
+          <th>Fee Type</th>
+          <td>${escapeHTML(feeType)}</td>
+        </tr>
+
+        <tr>
+          <th>Payment Mode</th>
+          <td>${escapeHTML(paymentMode)}</td>
+        </tr>
+
+        <tr>
+          <th>Amount Paid</th>
+          <td><strong>₹${amount.toFixed(2)}</strong></td>
+        </tr>
+
+      </table>
+
+
+      <div class="amount-words">
+        <strong>Amount in Words:</strong>
+        ${escapeHTML(numberToWords(amount))}
+      </div>
+
+
+      <div class="receipt-signatures">
+
+        <div class="signature-box">
+          <div class="signature-line"></div>
+          <strong>Student / Guardian Signature</strong>
         </div>
 
-        <div>
-          <div
-            style="
-              border-top:1px solid #222;
-              padding-top:0.4rem;
-            "
-          >
-            Authorized Signature
-          </div>
+        <div class="signature-box">
+          <div class="signature-line"></div>
+          <strong>Authorized Signature</strong>
         </div>
 
-        <div>
-          <div
-            style="
-              border-top:1px solid #222;
-              padding-top:0.4rem;
-            "
-          >
-            Principal Signature
-          </div>
+        <div class="signature-box">
+          <div class="signature-line"></div>
+          <strong>Principal Signature</strong>
         </div>
 
       </div>
+
 
       <div class="receipt-footer">
+        <div>
+          ${escapeHTML(institution.code)}
+        </div>
 
-        This is a system-generated receipt.
-
-        <br />
-
-        ${escapeHTML(INSTITUTION_INFO.name)}
-
+        <div>
+          This is a computer-generated receipt.
+        </div>
       </div>
 
     </div>
   `;
-
-  window.openModal(
-    "Fee Receipt",
-    `
-      ${receiptHTML}
-
-      <div
-        class="receipt-actions"
-        style="
-          display:flex;
-          gap:0.75rem;
-          justify-content:flex-end;
-          margin-top:0.75rem;
-          border-top:1px solid var(--gray-200);
-          padding-top:0.75rem;
-        "
-      >
-
-        <button
-          type="button"
-          onclick="window.downloadReceiptPDF('${escapeHTML(id)}')"
-          class="btn btn-primary"
-        >
-          Download PDF
-        </button>
-
-        <button
-          type="button"
-          onclick="window.print()"
-          class="btn btn-secondary"
-        >
-          Print
-        </button>
-
-      </div>
-    `,
-    "Close",
-    () => {
-      window.closeModal();
-    }
-  );
-
-  const modalConfirm =
-    document.getElementById(
-      "modalConfirm"
-    );
-
-  if (modalConfirm) {
-    modalConfirm.textContent =
-      "Close";
-
-    window.modalCallback =
-      () => {
-        window.closeModal();
-      };
-  }
 }
 
-// ============================================================
-// DOWNLOAD FEE RECEIPT PDF
-// ============================================================
 
-async function downloadReceiptPDF(id) {
-  await loadInstitutionInfo();
-
-  const fee = getFeeRecord(id);
-
-  if (!fee) {
-    window.showToast(
-      "Fee record not found",
-      "error"
-    );
-    return;
-  }
-
-  const data =
-    prepareFeeReceiptData(fee);
-
-  if (!data) {
-    window.showToast(
-      "Student not found",
-      "error"
-    );
-    return;
-  }
-
-  const {
-    student,
-    receiptNumber,
-    date,
-    paymentMethod,
-    academicYear,
-    amount,
-    paid,
-    pending
-  } = data;
-
-  const jsPDF =
-    window.jspdf?.jsPDF;
-
-  if (!jsPDF) {
-    window.showToast(
-      "jsPDF library not loaded",
-      "error"
-    );
-    return;
-  }
-
-  window.showToast(
-    "Generating PDF...",
-    "info"
-  );
-
-  const doc =
-    new jsPDF(
-      "p",
-      "mm",
-      "a4"
-    );
-
-  const pageWidth = 210;
-  const margin = 15;
-  let y = 20;
-
-  // ==========================================================
-  // HEADER
-  // ==========================================================
-
-  doc.setFontSize(18);
-  doc.setFont(
-    "helvetica",
-    "bold"
-  );
-
-  doc.setTextColor(
-    30,
-    41,
-    59
-  );
-
-  doc.text(
-    INSTITUTION_INFO.name,
-    pageWidth / 2,
-    y,
-    { align: "center" }
-  );
-
-  y += 7;
-
-  doc.setFontSize(10);
-  doc.setFont(
-    "helvetica",
-    "normal"
-  );
-
-  doc.setTextColor(
-    71,
-    85,
-    105
-  );
-
-  doc.text(
-    INSTITUTION_INFO.address,
-    pageWidth / 2,
-    y,
-    { align: "center" }
-  );
-
-  y += 5;
-
-  doc.setFontSize(8);
-
-  doc.setTextColor(
-    100,
-    116,
-    139
-  );
-
-  const contactText =
-    `Code: ${INSTITUTION_INFO.code} | ` +
-    `Phone: ${INSTITUTION_INFO.phone} | ` +
-    `Email: ${INSTITUTION_INFO.email}`;
-
-  doc.text(
-    contactText,
-    pageWidth / 2,
-    y,
-    { align: "center" }
-  );
-
-  y += 8;
-
-  doc.setDrawColor(
-    100,
-    116,
-    139
-  );
-
-  doc.setLineWidth(0.4);
-
-  doc.line(
-    margin,
-    y,
-    pageWidth - margin,
-    y
-  );
-
-  y += 7;
-
-  // ==========================================================
-  // TITLE
-  // ==========================================================
-
-  doc.setFontSize(14);
-
-  doc.setFont(
-    "helvetica",
-    "bold"
-  );
-
-  doc.setTextColor(
-    51,
-    65,
-    85
-  );
-
-  doc.text(
-    "FEE RECEIPT",
-    margin,
-    y
-  );
-
-  doc.setFontSize(9);
-
-  doc.setFont(
-    "helvetica",
-    "normal"
-  );
-
-  doc.text(
-    `# ${receiptNumber}`,
-    pageWidth - margin,
-    y,
-    { align: "right" }
-  );
-
-  y += 7;
-
-  doc.text(
-    `Date: ${date}`,
-    margin,
-    y
-  );
-
-  doc.text(
-    `Academic Year: ${academicYear}`,
-    pageWidth - margin,
-    y,
-    { align: "right" }
-  );
-
-  y += 8;
-
-  // ==========================================================
-  // STUDENT DETAILS
-  // ==========================================================
-
-  const studentRows = [
-    [
-      "Student",
-      student.name || "N/A"
-    ],
-    [
-      "Class",
-      `${student.class || ""}${student.section || ""}`
-    ],
-    [
-      "Roll No",
-      student.roll || "N/A"
-    ],
-    [
-      "Admission No",
-      student.admissionNo || "N/A"
-    ],
-    [
-      "Guardian",
-      student.guardian || "N/A"
-    ],
-    [
-      "Fee Type",
-      fee.feeType || "N/A"
-    ]
-  ];
-
-  const studentHeight =
-    studentRows.length * 7 + 5;
-
-  doc.setFillColor(
-    248,
-    250,
-    252
-  );
-
-  doc.rect(
-    margin,
-    y - 2,
-    pageWidth - 2 * margin,
-    studentHeight,
-    "F"
-  );
-
-  studentRows.forEach(
-    (row, index) => {
-
-      const rowY =
-        y + index * 7;
-
-      doc.setFontSize(9);
-
-      doc.setFont(
-        "helvetica",
-        "bold"
-      );
-
-      doc.setTextColor(
-        30,
-        41,
-        59
-      );
-
-      doc.text(
-        row[0],
-        margin + 3,
-        rowY + 5
-      );
-
-      doc.setFont(
-        "helvetica",
-        "normal"
-      );
-
-      doc.setTextColor(
-        51,
-        65,
-        85
-      );
-
-      doc.text(
-        String(row[1]),
-        70,
-        rowY + 5
-      );
-    }
-  );
-
-  y += studentHeight + 5;
-
-  // ==========================================================
-  // FEE DETAILS
-  // ==========================================================
-
-  const feeRows = [
-    [
-      "Amount",
-      `Rs. ${amount.toLocaleString("en-IN")}`
-    ],
-    [
-      "Paid",
-      `Rs. ${paid.toLocaleString("en-IN")}`
-    ],
-    [
-      "Pending",
-      `Rs. ${pending.toLocaleString("en-IN")}`
-    ],
-    [
-      "Status",
-      String(fee.status || "N/A").toUpperCase()
-    ],
-    [
-      "Payment Method",
-      paymentMethod
-    ],
-    [
-      "Amount in Words",
-      numberToWords(amount)
-    ]
-  ];
-
-  const feeHeight =
-    feeRows.length * 7 + 5;
-
-  doc.setFillColor(
-    248,
-    250,
-    252
-  );
-
-  doc.rect(
-    margin,
-    y - 2,
-    pageWidth - 2 * margin,
-    feeHeight,
-    "F"
-  );
-
-  feeRows.forEach(
-    (row, index) => {
-
-      const rowY =
-        y + index * 7;
-
-      doc.setFontSize(9);
-
-      doc.setFont(
-        "helvetica",
-        "bold"
-      );
-
-      doc.setTextColor(
-        30,
-        41,
-        59
-      );
-
-      doc.text(
-        row[0],
-        margin + 3,
-        rowY + 5
-      );
-
-      doc.setFont(
-        "helvetica",
-        "normal"
-      );
-
-      doc.setTextColor(
-        51,
-        65,
-        85
-      );
-
-      const value =
-        String(row[1]);
-
-      const lines =
-        doc.splitTextToSize(
-          value,
-          125
-        );
-
-      doc.text(
-        lines,
-        70,
-        rowY + 5
-      );
-    }
-  );
-
-  y += feeHeight + 15;
-
-  // ==========================================================
-  // SIGNATURES
-  // ==========================================================
-
-  const signatureY =
-    y + 12;
-
-  doc.setDrawColor(
-    51,
-    65,
-    85
-  );
-
-  doc.setLineWidth(0.3);
-
-  const signatureWidth = 48;
-
-  doc.line(
-    margin,
-    signatureY,
-    margin + signatureWidth,
-    signatureY
-  );
-
-  doc.line(
-    pageWidth / 2 - signatureWidth / 2,
-    signatureY,
-    pageWidth / 2 + signatureWidth / 2,
-    signatureY
-  );
-
-  doc.line(
-    pageWidth - margin - signatureWidth,
-    signatureY,
-    pageWidth - margin,
-    signatureY
-  );
-
-  doc.setFontSize(8);
-
-  doc.text(
-    "Student/Guardian Signature",
-    margin + signatureWidth / 2,
-    signatureY + 5,
-    { align: "center" }
-  );
-
-  doc.text(
-    "Authorized Signature",
-    pageWidth / 2,
-    signatureY + 5,
-    { align: "center" }
-  );
-
-  doc.text(
-    "Principal Signature",
-    pageWidth - margin - signatureWidth / 2,
-    signatureY + 5,
-    { align: "center" }
-  );
-
-  // ==========================================================
-  // FOOTER
-  // ==========================================================
-
-  doc.setDrawColor(
-    203,
-    213,
-    225
-  );
-
-  doc.line(
-    margin,
-    275,
-    pageWidth - margin,
-    275
-  );
-
-  doc.setFontSize(7);
-
-  doc.setFont(
-    "helvetica",
-    "italic"
-  );
-
-  doc.setTextColor(
-    100,
-    116,
-    139
-  );
-
-  doc.text(
-    "This is a system-generated receipt.",
-    pageWidth / 2,
-    281,
-    { align: "center" }
-  );
-
-  doc.text(
-    INSTITUTION_INFO.name,
-    pageWidth / 2,
-    286,
-    { align: "center" }
-  );
-
-  // ==========================================================
-  // SAVE
-  // ==========================================================
-
-  const safeName =
-    String(student.name || "Student")
-      .replace(/[^a-z0-9]+/gi, "_")
-      .replace(/^_+|_+$/g, "");
-
-  const fileName =
-    `Fee_Receipt_${safeName}_${new Date()
-      .toISOString()
-      .slice(0, 10)}.pdf`;
-
-  doc.save(fileName);
-
-  window.showToast(
-    "Receipt PDF downloaded successfully",
-    "success"
-  );
-}
-
-// ============================================================
-// VIEW RECEIPT FROM PAYMENT HISTORY
-// ============================================================
-
-async function viewReceipt(id) {
-  await loadInstitutionInfo();
-
-  const payments =
-    window.PAYMENTS || [];
-
-  const payment =
-    payments.find(
-      p => String(p.id) === String(id)
-    );
-
-  if (payment) {
-
-    const student =
-      getStudent(payment.studentId);
-
-    if (!student) {
-      window.showToast(
-        "Student not found",
-        "error"
-      );
+// ======================================================
+// SHOW RECEIPT
+// ======================================================
+
+async function showReceipt(id) {
+  try {
+    const institution = await loadInstitutionSettings();
+
+    const receipt =
+      findRecord(id, [
+        "PAYMENTS",
+        "payments",
+        "FEE_RECORDS",
+        "feeRecords"
+      ]);
+
+    if (!receipt) {
+      showToast?.("Receipt record not found.", "error");
       return;
     }
 
-    const receiptNumber =
-      payment.receiptNo ||
-      `RCP-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+    const student =
+      findRecord(
+        receipt.studentId ||
+        receipt.studentID ||
+        receipt.enrollmentId,
+        [
+          "STUDENTS",
+          "students"
+        ]
+      );
 
-    const date =
-      payment.date
-        ? new Date(
-            payment.date
-          ).toLocaleDateString(
-            "en-IN",
-            {
-              day: "2-digit",
-              month: "short",
-              year: "numeric"
-            }
-          )
-        : new Date().toLocaleDateString(
-            "en-IN",
-            {
-              day: "2-digit",
-              month: "short",
-              year: "numeric"
-            }
-          );
-
-    const amount =
-      Number(payment.amount) || 0;
-
-    const statusClass =
-      payment.status === "paid"
-        ? "status-paid"
-        : "status-pending";
-
-    const receiptHTML = `
-      <div
-        class="receipt-wrapper"
-        id="receiptContent"
-      >
-
-        <div class="school-header">
-
-          <h2 class="school-name">
-            ${escapeHTML(INSTITUTION_INFO.name)}
-          </h2>
-
-          <p class="school-address">
-            ${escapeHTML(INSTITUTION_INFO.address)}
-          </p>
-
-          <p class="school-contact">
-            <strong>Institution Code:</strong>
-            ${escapeHTML(INSTITUTION_INFO.code)}
-            &nbsp;|&nbsp;
-
-            <strong>Phone:</strong>
-            ${escapeHTML(INSTITUTION_INFO.phone)}
-            &nbsp;|&nbsp;
-
-            <strong>Email:</strong>
-            ${escapeHTML(INSTITUTION_INFO.email)}
-          </p>
-
-        </div>
-
-        <div class="receipt-title">
-
-          <h3>Payment Receipt</h3>
-
-          <span class="receipt-number">
-            # ${escapeHTML(receiptNumber)}
-          </span>
-
-        </div>
-
-        <div
-          style="
-            display:flex;
-            justify-content:space-between;
-            font-size:0.85rem;
-            margin-bottom:0.75rem;
-          "
-        >
-
-          <span>
-            <strong>Date:</strong>
-            ${escapeHTML(date)}
-          </span>
-
-          <span>
-            <strong>Academic Year:</strong>
-            ${escapeHTML(
-              payment.academicYear ||
-              getAcademicYear()
-            )}
-          </span>
-
-        </div>
-
-        <div
-          style="
-            display:grid;
-            grid-template-columns:1fr 1fr;
-            gap:0.3rem 1rem;
-            background:#f8fafc;
-            padding:0.75rem 1rem;
-            border-radius:5px;
-            margin-bottom:0.75rem;
-            font-size:0.85rem;
-          "
-        >
-
-          <div>
-            <strong>Student:</strong>
-            ${escapeHTML(student.name)}
-          </div>
-
-          <div>
-            <strong>Class:</strong>
-            ${escapeHTML(
-              `${student.class || ""}${student.section || ""}`
-            )}
-          </div>
-
-          <div>
-            <strong>Roll No:</strong>
-            ${escapeHTML(
-              student.roll || "N/A"
-            )}
-          </div>
-
-          <div>
-            <strong>Admission No:</strong>
-            ${escapeHTML(
-              student.admissionNo || "N/A"
-            )}
-          </div>
-
-          <div>
-            <strong>Guardian:</strong>
-            ${escapeHTML(
-              student.guardian || "N/A"
-            )}
-          </div>
-
-          <div>
-            <strong>Month:</strong>
-            ${escapeHTML(
-              payment.month || "N/A"
-            )}
-          </div>
-
-        </div>
-
-        <div class="receipt-details-grid">
-
-          <div>
-            <strong>Amount:</strong>
-            ₹${amount.toLocaleString("en-IN")}
-          </div>
-
-          <div>
-            <strong>Method:</strong>
-            ${escapeHTML(
-              payment.method || "N/A"
-            )}
-          </div>
-
-          <div>
-            <strong>Status:</strong>
-            <span class="status-badge ${statusClass}">
-              ${escapeHTML(
-                payment.status || "N/A"
-              )}
-            </span>
-          </div>
-
-          <div>
-            <strong>Amount in Words:</strong>
-            ${escapeHTML(
-              numberToWords(amount)
-            )}
-          </div>
-
-        </div>
-
-        <div
-          style="
-            display:grid;
-            grid-template-columns:1fr 1fr 1fr;
-            gap:1rem;
-            margin-top:2.5rem;
-            text-align:center;
-          "
-        >
-
-          <div
-            style="
-              border-top:1px solid #222;
-              padding-top:0.4rem;
-            "
-          >
-            Student/Guardian Signature
-          </div>
-
-          <div
-            style="
-              border-top:1px solid #222;
-              padding-top:0.4rem;
-            "
-          >
-            Authorized Signature
-          </div>
-
-          <div
-            style="
-              border-top:1px solid #222;
-              padding-top:0.4rem;
-            "
-          >
-            Principal Signature
-          </div>
-
-        </div>
-
-        <div class="receipt-footer">
-
-          This is a system-generated receipt.
-
-          <br />
-
-          ${escapeHTML(INSTITUTION_INFO.name)}
-
-        </div>
-
-      </div>
-    `;
-
-    window.openModal(
-      "Payment Receipt",
-      `
-        ${receiptHTML}
-
-        <div
-          class="receipt-actions"
-          style="
-            display:flex;
-            justify-content:flex-end;
-            margin-top:0.75rem;
-            border-top:1px solid var(--gray-200);
-            padding-top:0.75rem;
-          "
-        >
-
-          <button
-            type="button"
-            onclick="window.print()"
-            class="btn btn-secondary"
-          >
-            Print
-          </button>
-
-        </div>
-      `,
-      "Close",
-      () => {
-        window.closeModal();
-      }
+    const html = buildReceiptHTML(
+      receipt,
+      student,
+      institution
     );
 
-    return;
+    const container =
+      document.getElementById("receiptContainer") ||
+      document.getElementById("receiptPreview");
+
+    if (container) {
+      container.innerHTML = html;
+    }
+
+    const modal =
+      document.getElementById("receiptModal");
+
+    if (modal && typeof window.openModal === "function") {
+      window.openModal("receiptModal");
+    }
+
+    window.currentReceipt = {
+      receipt,
+      student,
+      institution
+    };
+
+  } catch (error) {
+    console.error("Unable to display receipt:", error);
+    showToast?.("Unable to load receipt.", "error");
   }
-
-  // ==========================================================
-  // FALLBACK TO FEE RECORD
-  // ==========================================================
-
-  const fee =
-    getFeeRecord(id);
-
-  if (fee) {
-    await showReceipt(id);
-    return;
-  }
-
-  window.showToast(
-    "No receipt found",
-    "error"
-  );
 }
 
-// ============================================================
+
+// ======================================================
+// VIEW RECEIPT
+// ======================================================
+
+async function viewReceipt(id) {
+  await showReceipt(id);
+}
+
+
+// ======================================================
 // REPRINT RECEIPT
-// ============================================================
+// ======================================================
 
 async function reprintReceipt(id) {
-  await viewReceipt(id);
+  await showReceipt(id);
 
-  setTimeout(
-    () => {
-      window.print();
-    },
-    500
-  );
+  setTimeout(() => {
+    window.print();
+  }, 300);
 }
 
-// ============================================================
-// PRINT LAST RECEIPT FOR STUDENT
-// ============================================================
 
-async function printLastReceipt(studentId) {
-  const payments =
-    window.PAYMENTS || [];
+// ======================================================
+// PRINT LAST RECEIPT
+// ======================================================
 
-  const studentPayments =
-    payments.filter(
-      payment =>
-        String(payment.studentId) ===
-        String(studentId)
-    );
-
-  if (studentPayments.length === 0) {
-    window.showToast(
-      "No payment history found",
-      "info"
-    );
+function printLastReceipt() {
+  if (!window.currentReceipt) {
+    showToast?.("No receipt selected.", "error");
     return;
   }
 
-  const lastPayment =
-    studentPayments[
-      studentPayments.length - 1
+  window.print();
+}
+
+
+// ======================================================
+// DOWNLOAD RECEIPT PDF
+// ======================================================
+
+async function downloadReceiptPDF(id) {
+  try {
+    if (!window.jspdf?.jsPDF) {
+      showToast?.("PDF generator is not available.", "error");
+      return;
+    }
+
+    const institution = await loadInstitutionSettings();
+
+    const receipt =
+      findRecord(id, [
+        "PAYMENTS",
+        "payments",
+        "FEE_RECORDS",
+        "feeRecords"
+      ]);
+
+    if (!receipt) {
+      showToast?.("Receipt record not found.", "error");
+      return;
+    }
+
+    const student =
+      findRecord(
+        receipt.studentId ||
+        receipt.studentID ||
+        receipt.enrollmentId,
+        [
+          "STUDENTS",
+          "students"
+        ]
+      );
+
+    const {
+      jsPDF
+    } = window.jspdf;
+
+    const doc = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4"
+    });
+
+    const amount = Number(
+      receipt.amount ??
+      receipt.paidAmount ??
+      receipt.totalAmount ??
+      0
+    );
+
+    const receiptNumber =
+      receipt.receiptNumber ||
+      receipt.receiptNo ||
+      receipt.id ||
+      "[Receipt Number]";
+
+    const date =
+      receipt.date ||
+      receipt.paymentDate ||
+      receipt.createdAt;
+
+    let y = 20;
+
+
+    // --------------------------------------------------
+    // HEADER
+    // --------------------------------------------------
+
+    doc.setFontSize(18);
+    doc.setFont("helvetica", "bold");
+
+    doc.text(
+      institution.name,
+      105,
+      y,
+      { align: "center" }
+    );
+
+    y += 8;
+
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+
+    doc.text(
+      institution.address,
+      105,
+      y,
+      { align: "center" }
+    );
+
+    y += 6;
+
+    if (institution.phone || institution.email) {
+      doc.text(
+        `${institution.phone || ""}${institution.phone && institution.email ? " | " : ""}${institution.email || ""}`,
+        105,
+        y,
+        { align: "center" }
+      );
+
+      y += 8;
+    }
+
+
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+
+    doc.text(
+      "FEE RECEIPT",
+      105,
+      y,
+      { align: "center" }
+    );
+
+    y += 12;
+
+
+    // --------------------------------------------------
+    // RECEIPT INFORMATION
+    // --------------------------------------------------
+
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+
+    doc.text(
+      `Receipt No.: ${receiptNumber}`,
+      20,
+      y
+    );
+
+    doc.text(
+      `Date: ${date ? new Date(date).toLocaleDateString("en-IN") : "[Date]"}`,
+      190,
+      y,
+      { align: "right" }
+    );
+
+    y += 7;
+
+    doc.text(
+      `Academic Year: ${getAcademicYear()}`,
+      20,
+      y
+    );
+
+    y += 10;
+
+
+    // --------------------------------------------------
+    // STUDENT DETAILS
+    // --------------------------------------------------
+
+    const studentName =
+      student?.name ||
+      receipt.studentName ||
+      "[Student Name]";
+
+    const enrollmentId =
+      student?.enrollmentId ||
+      receipt.enrollmentId ||
+      "[Enrollment ID]";
+
+    const className =
+      student?.class ||
+      receipt.class ||
+      "[Class]";
+
+    const section =
+      student?.section ||
+      receipt.section ||
+      "[Section]";
+
+    const feeType =
+      receipt.feeType ||
+      receipt.type ||
+      "School Fee";
+
+    const paymentMode =
+      receipt.paymentMode ||
+      receipt.mode ||
+      "[Payment Mode]";
+
+
+    const rows = [
+      ["Enrollment ID", enrollmentId],
+      ["Student Name", studentName],
+      ["Class", className],
+      ["Section", section],
+      ["Fee Type", feeType],
+      ["Payment Mode", paymentMode],
+      ["Amount Paid", `₹${amount.toFixed(2)}`]
     ];
 
-  await viewReceipt(
-    lastPayment.id
-  );
 
-  setTimeout(
-    () => {
-      window.print();
-    },
-    500
+    if (typeof doc.autoTable === "function") {
+
+      doc.autoTable({
+        startY: y,
+        head: [["Particular", "Details"]],
+        body: rows,
+        theme: "grid",
+        styles: {
+          fontSize: 10,
+          cellPadding: 4
+        },
+        headStyles: {
+          fontStyle: "bold"
+        },
+        columnStyles: {
+          0: {
+            cellWidth: 55
+          },
+          1: {
+            cellWidth: 125
+          }
+        }
+      });
+
+      y = doc.lastAutoTable.finalY + 10;
+
+    } else {
+
+      rows.forEach(([label, value]) => {
+
+        doc.setFont("helvetica", "bold");
+        doc.text(label, 20, y);
+
+        doc.setFont("helvetica", "normal");
+        doc.text(String(value), 75, y);
+
+        y += 7;
+      });
+
+      y += 5;
+    }
+
+
+    // --------------------------------------------------
+    // AMOUNT IN WORDS
+    // --------------------------------------------------
+
+    doc.setFont("helvetica", "bold");
+
+    doc.text(
+      "Amount in Words:",
+      20,
+      y
+    );
+
+    doc.setFont("helvetica", "normal");
+
+    const words =
+      numberToWords(amount);
+
+    const wrappedWords =
+      doc.splitTextToSize(words, 160);
+
+    doc.text(
+      wrappedWords,
+      55,
+      y
+    );
+
+    y +=
+      Math.max(
+        8,
+        wrappedWords.length * 5
+      ) + 18;
+
+
+    // --------------------------------------------------
+    // SIGNATURE AREAS
+    // --------------------------------------------------
+
+    const signatureY = y;
+
+    doc.line(
+      20,
+      signatureY,
+      70,
+      signatureY
+    );
+
+    doc.line(
+      80,
+      signatureY,
+      130,
+      signatureY
+    );
+
+    doc.line(
+      140,
+      signatureY,
+      190,
+      signatureY
+    );
+
+    doc.setFontSize(9);
+
+    doc.text(
+      "Student / Guardian",
+      45,
+      signatureY + 6,
+      { align: "center" }
+    );
+
+    doc.text(
+      "Authorized Signature",
+      105,
+      signatureY + 6,
+      { align: "center" }
+    );
+
+    doc.text(
+      "Principal Signature",
+      165,
+      signatureY + 6,
+      { align: "center" }
+    );
+
+
+    // --------------------------------------------------
+    // FOOTER
+    // --------------------------------------------------
+
+    doc.setFontSize(8);
+
+    doc.text(
+      institution.code,
+      20,
+      285
+    );
+
+    doc.text(
+      "This is a computer-generated receipt.",
+      190,
+      285,
+      { align: "right" }
+    );
+
+
+    const safeReceiptNumber =
+      String(receiptNumber)
+        .replace(/[^a-z0-9_-]/gi, "_");
+
+    doc.save(
+      `Fee_Receipt_${safeReceiptNumber}.pdf`
+    );
+
+  } catch (error) {
+    console.error(
+      "Unable to generate receipt PDF:",
+      error
+    );
+
+    showToast?.(
+      "Unable to generate receipt PDF.",
+      "error"
+    );
+  }
+}
+
+
+// ======================================================
+// PAYMENT HISTORY
+// ======================================================
+
+function getPaymentHistory(enrollmentId) {
+  const payments =
+    Array.isArray(window.PAYMENTS)
+      ? window.PAYMENTS
+      : Array.isArray(window.payments)
+        ? window.payments
+        : [];
+
+  return payments.filter(
+    payment =>
+      String(
+        payment.enrollmentId ||
+        payment.studentEnrollmentId ||
+        ""
+      ) === String(enrollmentId)
   );
 }
 
-// ============================================================
-// INITIALIZE
-// ============================================================
+
+// ======================================================
+// DOM INITIALIZATION
+// ======================================================
 
 document.addEventListener(
   "DOMContentLoaded",
-  async () => {
-    await loadInstitutionInfo();
+  () => {
+
+    const printButton =
+      document.getElementById("printReceiptBtn");
+
+    if (printButton) {
+      printButton.addEventListener(
+        "click",
+        printLastReceipt
+      );
+    }
+
+    const downloadButton =
+      document.getElementById("downloadReceiptBtn");
+
+    if (downloadButton) {
+      downloadButton.addEventListener(
+        "click",
+        () => {
+
+          const receipt =
+            window.currentReceipt?.receipt;
+
+          if (receipt?.id) {
+            downloadReceiptPDF(receipt.id);
+          }
+        }
+      );
+    }
+
   }
 );
 
-// ============================================================
-// EXPOSE GLOBALLY
-// ============================================================
 
-window.showReceipt =
-  showReceipt;
+// ======================================================
+// GLOBAL FUNCTIONS
+// ======================================================
 
-window.downloadReceiptPDF =
-  downloadReceiptPDF;
-
-window.viewReceipt =
-  viewReceipt;
-
-window.reprintReceipt =
-  reprintReceipt;
-
-window.printLastReceipt =
-  printLastReceipt;
-
-window.loadInstitutionInfo =
-  loadInstitutionInfo;
-
-window.numberToWords =
-  numberToWords;
-
-window.INSTITUTION_INFO =
-  INSTITUTION_INFO;
-```
+window.showReceipt = showReceipt;
+window.viewReceipt = viewReceipt;
+window.reprintReceipt = reprintReceipt;
+window.printLastReceipt = printLastReceipt;
+window.downloadReceiptPDF = downloadReceiptPDF;
+window.getPaymentHistory = getPaymentHistory;
+window.loadInstitutionSettings = loadInstitutionSettings;
