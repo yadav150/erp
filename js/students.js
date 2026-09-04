@@ -1,95 +1,155 @@
-```javascript
+import {
+  getDatabase,
+  ref,
+  get,
+  push,
+  set,
+  update,
+  remove
+} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
+
+import {
+  initializeApp,
+  getApps,
+  getApp
+} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+
 // ============================================================
-// STUDENTS MODULE
-// CRUD, RENDER, SEARCH, FILTERS, ADD STUDENT PAGE
+// FIREBASE
 // ============================================================
 
-import { createData, updateData, deleteData } from './firebase.js';
+const firebaseConfig = {
+  apiKey: "AIzaSyCbD7nHFYAKJHVe9eV_JL1A0qHQw",
+  authDomain: "modelerp-c7ff7.firebaseapp.com",
+  databaseURL: "https://modelerp-c7ff7-default-rtdb.firebaseio.com",
+  projectId: "modelerp-c7ff7",
+  storageBucket: "modelerp-c7ff7.firebasestorage.app",
+  messagingSenderId: "808804437563",
+  appId: "1:808804437563:web:37083674d5b6acdbe8161e",
+  measurementId: "G-KT82WYLM0J"
+};
 
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+const db = getDatabase(app);
 
 // ============================================================
 // HELPERS
 // ============================================================
 
 function escapeHTML(value) {
-  if (value === null || value === undefined) return '';
+  if (typeof window.escapeHTML === "function") {
+    return window.escapeHTML(value);
+  }
 
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
+function getAcademicYear() {
+  if (typeof window.getCurrentAcademicYear === "function") {
+    return window.getCurrentAcademicYear();
+  }
 
-function getCurrentAcademicYear() {
-  return (
-    window.CURRENT_ACADEMIC_YEAR ||
-    document.getElementById('academicYear')?.textContent?.trim() ||
-    ''
-  );
-}
-
-
-function generateEnrollmentId() {
   const year = new Date().getFullYear();
-  const students = Array.isArray(window.STUDENTS) ? window.STUDENTS : [];
-
-  let highestNumber = 0;
-
-  students.forEach(student => {
-    const enrollmentId = String(student.enrollmentId || '');
-
-    if (
-      enrollmentId.length === 9 &&
-      enrollmentId.startsWith(String(year))
-    ) {
-      const numberPart = parseInt(enrollmentId.slice(4), 10);
-
-      if (!Number.isNaN(numberPart)) {
-        highestNumber = Math.max(highestNumber, numberPart);
-      }
-    }
-  });
-
-  const nextNumber = highestNumber + 1;
-
-  return `${year}${String(nextNumber).padStart(5, '0')}`;
+  return `${year}-${year + 1}`;
 }
 
+// ============================================================
+// ENROLLMENT ID
+// FORMAT: YYYY + 5 DIGIT SEQUENCE
+// EXAMPLE: 202600001
+// ============================================================
+
+async function generateEnrollmentId() {
+  const year = new Date().getFullYear();
+  const studentsRef = ref(db, "students");
+  const snapshot = await get(studentsRef);
+
+  let highestSequence = 0;
+  const prefix = String(year);
+
+  if (snapshot.exists()) {
+    const data = snapshot.val();
+
+    Object.values(data).forEach(student => {
+      const enrollmentId = String(student.enrollmentId || "");
+
+      if (enrollmentId.startsWith(prefix)) {
+        const sequence = parseInt(
+          enrollmentId.substring(prefix.length),
+          10
+        );
+
+        if (!Number.isNaN(sequence) && sequence > highestSequence) {
+          highestSequence = sequence;
+        }
+      }
+    });
+  }
+
+  return `${prefix}${String(highestSequence + 1).padStart(5, "0")}`;
+}
+
+// ============================================================
+// LOAD STUDENTS
+// ============================================================
+
+async function loadStudents() {
+  try {
+    const snapshot = await get(ref(db, "students"));
+
+    if (!snapshot.exists()) {
+      window.STUDENTS = [];
+      renderStudents();
+      return [];
+    }
+
+    const data = snapshot.val();
+
+    window.STUDENTS = Object.entries(data).map(([id, student]) => ({
+      id,
+      ...student
+    }));
+
+    renderStudents();
+
+    return window.STUDENTS;
+  } catch (error) {
+    console.error("Load students error:", error);
+
+    if (typeof window.showToast === "function") {
+      window.showToast("Failed to load student data.", "error");
+    }
+
+    return [];
+  }
+}
 
 // ============================================================
 // RENDER STUDENTS TABLE + STATS
 // ============================================================
 
-function renderStudents(filter = 'all', search = '') {
-
-  const students = Array.isArray(window.STUDENTS)
-    ? window.STUDENTS
-    : [];
-
-
-  // ----------------------------------------------------------
-  // STATS
-  // ----------------------------------------------------------
+function renderStudents(filter = "all", search = "") {
+  const students = window.STUDENTS || [];
 
   const totalStudents = students.length;
-
   const paidCount = students.filter(
-    student => student.feeStatus === 'paid'
+    student => student.feeStatus === "paid"
   ).length;
 
   const pendingCount = students.filter(
-    student => student.feeStatus === 'pending'
+    student => student.feeStatus === "pending"
   ).length;
 
   const overdueCount = students.filter(
-    student => student.feeStatus === 'overdue'
+    student => student.feeStatus === "overdue"
   ).length;
 
-
-  const statsGrid = document.getElementById('studentStatsGrid');
+  const statsGrid = document.getElementById("studentStatsGrid");
 
   if (statsGrid) {
     statsGrid.innerHTML = `
@@ -115,63 +175,39 @@ function renderStudents(filter = 'all', search = '') {
     `;
   }
 
-
-  // ----------------------------------------------------------
-  // FILTER
-  // ----------------------------------------------------------
-
   let list = [...students];
 
-  if (filter && filter !== 'all') {
-
-    const selectedClass = String(filter).trim();
-
-    list = list.filter(student =>
-      String(student.class || '').trim() === selectedClass
+  if (filter !== "all") {
+    list = list.filter(
+      student => String(student.class) === String(filter)
     );
   }
 
+  const query = search.trim().toLowerCase();
 
-  // ----------------------------------------------------------
-  // SEARCH
-  // ----------------------------------------------------------
-
-  if (search.trim()) {
-
-    const query = search.trim().toLowerCase();
-
+  if (query) {
     list = list.filter(student => {
-
-      const searchableText = [
-        student.name,
+      const values = [
         student.enrollmentId,
+        student.name,
         student.admissionNo,
         student.mobile,
         student.guardian,
-        student.class,
         student.section,
         student.roll
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
+      ];
 
-      return searchableText.includes(query);
+      return values.some(value =>
+        String(value ?? "").toLowerCase().includes(query)
+      );
     });
   }
 
-
-  // ----------------------------------------------------------
-  // TABLE
-  // ----------------------------------------------------------
-
-  const tbody = document.getElementById('studentTableBody');
+  const tbody = document.getElementById("studentTableBody");
 
   if (!tbody) return;
 
-
   if (list.length === 0) {
-
     tbody.innerHTML = `
       <tr>
         <td colspan="8" class="empty-state">
@@ -179,40 +215,36 @@ function renderStudents(filter = 'all', search = '') {
         </td>
       </tr>
     `;
-
     return;
   }
 
-
   tbody.innerHTML = list.map((student, index) => {
-
     const feeStatus = String(
-      student.feeStatus || 'pending'
+      student.feeStatus || "pending"
     ).toLowerCase();
 
     return `
       <tr>
-
         <td>${index + 1}</td>
 
         <td>
-          ${escapeHTML(student.enrollmentId || '-')}
+          ${escapeHTML(student.enrollmentId || "-")}
         </td>
 
         <td>
-          ${escapeHTML(student.name || '-')}
+          ${escapeHTML(student.name || "-")}
         </td>
 
         <td>
-          ${escapeHTML(student.class || '-')}
+          ${escapeHTML(student.class || "-")}
         </td>
 
         <td>
-          ${escapeHTML(student.section || '-')}
+          ${escapeHTML(student.section || "-")}
         </td>
 
         <td>
-          ${escapeHTML(student.roll || '-')}
+          ${escapeHTML(student.roll || "-")}
         </td>
 
         <td>
@@ -226,9 +258,19 @@ function renderStudents(filter = 'all', search = '') {
 
             <button
               type="button"
+              class="btn-view"
+              data-id="${escapeHTML(student.id)}"
+              data-action="viewStudent"
+            >
+              View
+            </button>
+
+            <button
+              type="button"
               class="btn-edit"
               data-id="${escapeHTML(student.id)}"
-              data-action="editStudent">
+              data-action="editStudent"
+            >
               Edit
             </button>
 
@@ -236,765 +278,688 @@ function renderStudents(filter = 'all', search = '') {
               type="button"
               class="btn-delete"
               data-id="${escapeHTML(student.id)}"
-              data-action="deleteStudent">
+              data-action="deleteStudent"
+            >
               Delete
             </button>
 
           </div>
         </td>
-
       </tr>
     `;
-  }).join('');
+  }).join("");
 
-
-  // ----------------------------------------------------------
-  // EDIT EVENTS
-  // ----------------------------------------------------------
-
-  tbody
-    .querySelectorAll('[data-action="editStudent"]')
-    .forEach(button => {
-
-      button.addEventListener('click', () => {
-        editStudent(button.dataset.id);
-      });
-
+  tbody.querySelectorAll('[data-action="viewStudent"]').forEach(button => {
+    button.addEventListener("click", () => {
+      viewStudent(button.dataset.id);
     });
+  });
 
-
-  // ----------------------------------------------------------
-  // DELETE EVENTS
-  // ----------------------------------------------------------
-
-  tbody
-    .querySelectorAll('[data-action="deleteStudent"]')
-    .forEach(button => {
-
-      button.addEventListener('click', () => {
-        deleteStudent(button.dataset.id);
-      });
-
+  tbody.querySelectorAll('[data-action="editStudent"]').forEach(button => {
+    button.addEventListener("click", () => {
+      editStudent(button.dataset.id);
     });
+  });
+
+  tbody.querySelectorAll('[data-action="deleteStudent"]').forEach(button => {
+    button.addEventListener("click", () => {
+      deleteStudent(button.dataset.id);
+    });
+  });
 }
 
+// ============================================================
+// VIEW STUDENT
+// VIEWING MAY USE MODAL
+// ============================================================
+
+function viewStudent(id) {
+  const student = (window.STUDENTS || []).find(
+    item => item.id === id
+  );
+
+  if (!student) {
+    if (typeof window.showToast === "function") {
+      window.showToast("Student record not found.", "error");
+    }
+    return;
+  }
+
+  const photo = student.photo
+    ? `
+      <img
+        src="${escapeHTML(student.photo)}"
+        alt="Student Photo"
+        class="student-view-photo"
+      >
+    `
+    : "";
+
+  const content = `
+    <div class="student-view">
+
+      <div class="student-view-header">
+        ${photo}
+
+        <div>
+          <h3>${escapeHTML(student.name || "-")}</h3>
+          <p>
+            Enrollment ID:
+            <strong>${escapeHTML(student.enrollmentId || "-")}</strong>
+          </p>
+        </div>
+      </div>
+
+      <div class="student-details-grid">
+
+        <div>
+          <span>Admission No</span>
+          <strong>${escapeHTML(student.admissionNo || "-")}</strong>
+        </div>
+
+        <div>
+          <span>Class</span>
+          <strong>${escapeHTML(student.class || "-")}</strong>
+        </div>
+
+        <div>
+          <span>Section</span>
+          <strong>${escapeHTML(student.section || "-")}</strong>
+        </div>
+
+        <div>
+          <span>Roll No</span>
+          <strong>${escapeHTML(student.roll || "-")}</strong>
+        </div>
+
+        <div>
+          <span>Guardian</span>
+          <strong>${escapeHTML(student.guardian || "-")}</strong>
+        </div>
+
+        <div>
+          <span>Mobile</span>
+          <strong>${escapeHTML(student.mobile || "-")}</strong>
+        </div>
+
+        <div>
+          <span>Academic Year</span>
+          <strong>${escapeHTML(
+            student.academicYear || getAcademicYear()
+          )}</strong>
+        </div>
+
+        <div>
+          <span>Fee Status</span>
+          <strong>${escapeHTML(student.feeStatus || "pending")}</strong>
+        </div>
+
+      </div>
+
+    </div>
+  `;
+
+  if (typeof window.openModal === "function") {
+    window.openModal("Student Details", content);
+  }
+}
 
 // ============================================================
 // ADD STUDENT
-// DEDICATED PAGE — NO MODAL
+// DEDICATED PAGE ONLY
 // ============================================================
 
 async function addStudent() {
-
-  const form = document.getElementById('addStudentForm');
+  const form = document.getElementById("addStudentForm");
 
   if (!form) return;
 
+  const formData = new FormData(form);
 
-  // ----------------------------------------------------------
-  // READ FORM DATA
-  // ----------------------------------------------------------
+  const name = String(formData.get("name") || "").trim();
+  const classValue = String(formData.get("class") || "").trim();
+  const section = String(formData.get("section") || "").trim();
+  const rollValue = String(formData.get("roll") || "").trim();
 
-  const name =
-    document.getElementById('studentName')?.value.trim() || '';
-
-  const classValue =
-    document.getElementById('studentClass')?.value.trim() || '';
-
-  const section =
-    document.getElementById('studentSection')?.value.trim() || '';
-
-  const roll =
-    document.getElementById('studentRoll')?.value.trim() || '';
-
-  const feeStatus =
-    document.getElementById('studentFeeStatus')?.value || 'pending';
-
-  const admissionNo =
-    document.getElementById('studentAdmissionNo')?.value.trim() || '';
-
-  const mobile =
-    document.getElementById('studentMobile')?.value.trim() || '';
-
-  const guardian =
-    document.getElementById('studentGuardian')?.value.trim() || '';
-
-  const photo =
-    document.getElementById('studentPhotoUrl')?.value.trim() || '';
-
-
-  // ----------------------------------------------------------
-  // VALIDATION
-  // ----------------------------------------------------------
-
-  if (!name || !classValue || !roll) {
-
-    if (window.showToast) {
+  if (!name || !classValue || !section || !rollValue) {
+    if (typeof window.showToast === "function") {
       window.showToast(
-        'Please fill all required fields.',
-        'error'
+        "Please fill all required fields.",
+        "error"
       );
     }
-
     return;
   }
 
-
-  // ----------------------------------------------------------
-  // GENERATE UNIQUE ENROLLMENT ID
-  // ----------------------------------------------------------
-
-  const enrollmentId = generateEnrollmentId();
-
-
-  // ----------------------------------------------------------
-  // STUDENT OBJECT
-  // ----------------------------------------------------------
-
-  const newStudent = {
-
-    enrollmentId,
-
-    name,
-
-    class: classValue,
-
-    section,
-
-    roll,
-
-    feeStatus,
-
-    admissionNo,
-
-    mobile,
-
-    guardian,
-
-    photo,
-
-    academicYear: getCurrentAcademicYear(),
-
-    createdAt: Date.now(),
-
-    updatedAt: Date.now()
-  };
-
-
-  // ----------------------------------------------------------
-  // SUBMIT BUTTON
-  // ----------------------------------------------------------
-
   const submitButton =
-    form.querySelector(
-      'button[type="submit"], #submitStudentBtn'
-    );
-
+    form.querySelector('[type="submit"]');
 
   if (submitButton) {
-
     submitButton.disabled = true;
-
-    submitButton.dataset.originalText =
-      submitButton.textContent;
-
-    submitButton.innerHTML = `
-      <span class="spinner"></span>
-      Saving Student...
-    `;
+    submitButton.textContent = "Saving...";
   }
 
-
-  // ----------------------------------------------------------
-  // LOADING
-  // ----------------------------------------------------------
-
-  if (window.showLoading) {
-    window.showLoading();
+  if (typeof window.showLoading === "function") {
+    window.showLoading("Saving student...");
   }
-
 
   try {
+    const enrollmentId = await generateEnrollmentId();
 
-    // --------------------------------------------------------
-    // SAVE TO REALTIME DATABASE
-    // --------------------------------------------------------
+    const student = {
+      enrollmentId,
+      admissionNo:
+        String(formData.get("admissionNo") || "").trim(),
 
-    const result = await createData(
-      'students',
-      newStudent
-    );
+      name,
 
+      class: Number(classValue),
 
-    // --------------------------------------------------------
-    // UPDATE LOCAL ARRAY
-    // --------------------------------------------------------
+      section,
 
-    if (!Array.isArray(window.STUDENTS)) {
-      window.STUDENTS = [];
-    }
+      roll: Number(rollValue),
 
-    window.STUDENTS.push(result);
+      feeStatus:
+        String(formData.get("feeStatus") || "pending").trim(),
 
+      mobile:
+        String(formData.get("mobile") || "").trim(),
 
-    // --------------------------------------------------------
-    // SUCCESS
-    // --------------------------------------------------------
+      guardian:
+        String(formData.get("guardian") || "").trim(),
 
-    if (window.showToast) {
+      photo:
+        String(formData.get("photo") || "").trim(),
 
+      academicYear:
+        String(
+          formData.get("academicYear") ||
+          getAcademicYear()
+        ).trim(),
+
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+
+    const studentsRef = ref(db, "students");
+    const newStudentRef = push(studentsRef);
+
+    await set(newStudentRef, student);
+
+    const savedStudent = {
+      id: newStudentRef.key,
+      ...student
+    };
+
+    window.STUDENTS = window.STUDENTS || [];
+    window.STUDENTS.push(savedStudent);
+
+    if (typeof window.showToast === "function") {
       window.showToast(
         `Student added successfully. Enrollment ID: ${enrollmentId}`,
-        'success'
+        "success"
       );
     }
 
+    form.reset();
 
-    // --------------------------------------------------------
-    // SHOW GENERATED ENROLLMENT ID
-    // --------------------------------------------------------
-
-    const generatedId =
-      document.getElementById('generatedEnrollmentId');
-
-    if (generatedId) {
-      generatedId.textContent = enrollmentId;
-    }
-
-
-    // --------------------------------------------------------
-    // OPTIONAL SUCCESS SECTION
-    // --------------------------------------------------------
-
-    const successSection =
-      document.getElementById('studentSuccess');
-
-    if (successSection) {
-      successSection.hidden = false;
-    }
-
-
-    // --------------------------------------------------------
-    // DISABLE SUBMIT AFTER SUCCESS
-    // --------------------------------------------------------
-
-    if (submitButton) {
-
-      submitButton.disabled = true;
-
-      submitButton.textContent =
-        'Student Added Successfully';
-    }
-
-
-    // --------------------------------------------------------
-    // DASHBOARD UPDATE
-    // --------------------------------------------------------
-
-    if (window.renderDashboard) {
+    if (typeof window.renderDashboard === "function") {
       window.renderDashboard();
     }
 
+    renderStudents();
+
+    setTimeout(() => {
+      window.location.href = "students.html";
+    }, 700);
 
   } catch (error) {
+    console.error("Add student error:", error);
 
-    console.error(
-      'Add student error:',
-      error
-    );
-
-
-    if (window.showToast) {
-
+    if (typeof window.showToast === "function") {
       window.showToast(
-        'Failed to add student. Please try again.',
-        'error'
+        "Failed to add student. Please try again.",
+        "error"
       );
     }
 
-
-    if (submitButton) {
-
-      submitButton.disabled = false;
-
-      submitButton.textContent =
-        submitButton.dataset.originalText ||
-        'Submit';
+  } finally {
+    if (typeof window.hideLoading === "function") {
+      window.hideLoading();
     }
 
-
-  } finally {
-
-    if (window.hideLoading) {
-      window.hideLoading();
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = "Save Student";
     }
   }
 }
-
 
 // ============================================================
 // EDIT STUDENT
+// DEDICATED PAGE ONLY
 // ============================================================
 
-async function editStudent(id) {
+function editStudent(id) {
+  if (!id) return;
 
-  const student =
-    window.STUDENTS?.find(
-      item => item.id === id
-    );
-
-  if (!student) return;
-
-
-  // ----------------------------------------------------------
-  // DEDICATED EDIT PAGE
-  // ----------------------------------------------------------
-
-  const editUrl =
+  window.location.href =
     `edit-student.html?id=${encodeURIComponent(id)}`;
-
-
-  window.location.href = editUrl;
 }
-
 
 // ============================================================
 // UPDATE STUDENT
-// Used by edit-student.html
 // ============================================================
 
 async function updateStudent(id) {
+  const form = document.getElementById("editStudentForm");
 
-  const student =
-    window.STUDENTS?.find(
-      item => item.id === id
-    );
+  if (!form || !id) return;
 
-  if (!student) return;
+  const existingStudent = (window.STUDENTS || []).find(
+    student => student.id === id
+  );
 
-
-  const form =
-    document.getElementById('editStudentForm');
-
-  if (!form) return;
-
-
-  const name =
-    document.getElementById('studentName')?.value.trim() || '';
-
-  const classValue =
-    document.getElementById('studentClass')?.value.trim() || '';
-
-  const section =
-    document.getElementById('studentSection')?.value.trim() || '';
-
-  const roll =
-    document.getElementById('studentRoll')?.value.trim() || '';
-
-  const feeStatus =
-    document.getElementById('studentFeeStatus')?.value || 'pending';
-
-  const admissionNo =
-    document.getElementById('studentAdmissionNo')?.value.trim() || '';
-
-  const mobile =
-    document.getElementById('studentMobile')?.value.trim() || '';
-
-  const guardian =
-    document.getElementById('studentGuardian')?.value.trim() || '';
-
-  const photo =
-    document.getElementById('studentPhotoUrl')?.value.trim() ||
-    student.photo ||
-    '';
-
-
-  if (!name || !classValue || !roll) {
-
-    if (window.showToast) {
-
-      window.showToast(
-        'Please fill all required fields.',
-        'error'
-      );
+  if (!existingStudent) {
+    if (typeof window.showToast === "function") {
+      window.showToast("Student record not found.", "error");
     }
-
     return;
   }
 
+  const formData = new FormData(form);
 
-  const updatedStudent = {
+  const name = String(formData.get("name") || "").trim();
+  const classValue = String(formData.get("class") || "").trim();
+  const section = String(formData.get("section") || "").trim();
+  const rollValue = String(formData.get("roll") || "").trim();
 
-    name,
-
-    class: classValue,
-
-    section,
-
-    roll,
-
-    feeStatus,
-
-    admissionNo,
-
-    mobile,
-
-    guardian,
-
-    photo,
-
-    academicYear:
-      student.academicYear ||
-      getCurrentAcademicYear(),
-
-    updatedAt: Date.now()
-  };
-
-
-  const submitButton =
-    form.querySelector(
-      'button[type="submit"], #updateStudentBtn'
-    );
-
-
-  if (submitButton) {
-
-    submitButton.disabled = true;
-
-    submitButton.dataset.originalText =
-      submitButton.textContent;
-
-    submitButton.innerHTML = `
-      <span class="spinner"></span>
-      Updating...
-    `;
+  if (!name || !classValue || !section || !rollValue) {
+    if (typeof window.showToast === "function") {
+      window.showToast(
+        "Please fill all required fields.",
+        "error"
+      );
+    }
+    return;
   }
 
+  const submitButton =
+    form.querySelector('[type="submit"]');
+
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = "Updating...";
+  }
+
+  if (typeof window.showLoading === "function") {
+    window.showLoading("Updating student...");
+  }
 
   try {
+    const updatedStudent = {
+      ...existingStudent,
 
-    await updateData(
-      'students',
-      id,
+      name,
+
+      class: Number(classValue),
+
+      section,
+
+      roll: Number(rollValue),
+
+      admissionNo:
+        String(
+          formData.get("admissionNo") ??
+          existingStudent.admissionNo ??
+          ""
+        ).trim(),
+
+      feeStatus:
+        String(
+          formData.get("feeStatus") ??
+          existingStudent.feeStatus ??
+          "pending"
+        ).trim(),
+
+      mobile:
+        String(
+          formData.get("mobile") ??
+          existingStudent.mobile ??
+          ""
+        ).trim(),
+
+      guardian:
+        String(
+          formData.get("guardian") ??
+          existingStudent.guardian ??
+          ""
+        ).trim(),
+
+      photo:
+        String(
+          formData.get("photo") ??
+          existingStudent.photo ??
+          ""
+        ).trim(),
+
+      academicYear:
+        String(
+          formData.get("academicYear") ||
+          existingStudent.academicYear ||
+          getAcademicYear()
+        ).trim(),
+
+      updatedAt: Date.now()
+    };
+
+    delete updatedStudent.id;
+
+    await update(
+      ref(db, `students/${id}`),
       updatedStudent
     );
 
-
-    const index =
-      window.STUDENTS.findIndex(
-        item => item.id === id
-      );
-
+    const index = window.STUDENTS.findIndex(
+      student => student.id === id
+    );
 
     if (index !== -1) {
-
       window.STUDENTS[index] = {
-        ...window.STUDENTS[index],
+        id,
         ...updatedStudent
       };
     }
 
-
-    if (window.showToast) {
-
+    if (typeof window.showToast === "function") {
       window.showToast(
-        'Student updated successfully.',
-        'success'
+        "Student updated successfully.",
+        "success"
       );
     }
 
+    renderStudents();
 
-    if (window.renderDashboard) {
-      window.renderDashboard();
-    }
-
-
-    if (submitButton) {
-      submitButton.textContent =
-        'Updated Successfully';
-    }
-
+    setTimeout(() => {
+      window.location.href = "students.html";
+    }, 700);
 
   } catch (error) {
+    console.error("Update student error:", error);
 
-    console.error(
-      'Update student error:',
-      error
-    );
-
-
-    if (window.showToast) {
-
+    if (typeof window.showToast === "function") {
       window.showToast(
-        'Failed to update student. Please try again.',
-        'error'
+        "Failed to update student. Please try again.",
+        "error"
       );
     }
 
+  } finally {
+    if (typeof window.hideLoading === "function") {
+      window.hideLoading();
+    }
 
     if (submitButton) {
-
       submitButton.disabled = false;
-
-      submitButton.textContent =
-        submitButton.dataset.originalText ||
-        'Update';
+      submitButton.textContent = "Update Student";
     }
   }
 }
-
 
 // ============================================================
 // DELETE STUDENT
 // ============================================================
 
 async function deleteStudent(id) {
+  if (!id) return;
 
-  const student =
-    window.STUDENTS?.find(
-      item => item.id === id
-    );
+  const student = (window.STUDENTS || []).find(
+    item => item.id === id
+  );
 
   if (!student) return;
 
-
-  const confirmed = confirm(
-    `Are you sure you want to delete ${student.name || 'this student'}?`
-  );
-
-
-  if (!confirmed) return;
-
-
-  const button =
-    document.querySelector(
-      `button[data-id="${CSS.escape(String(id))}"][data-action="deleteStudent"]`
-    );
-
-
-  if (button) {
-
-    button.disabled = true;
-
-    button.dataset.originalText =
-      button.textContent;
-
-    button.textContent =
-      'Deleting...';
-  }
-
-
-  try {
-
-    await deleteData(
-      'students',
-      id
-    );
-
-
-    window.STUDENTS =
-      window.STUDENTS.filter(
-        item => item.id !== id
+  const deleteAction = async () => {
+    try {
+      const button = document.querySelector(
+        `button[data-id="${CSS.escape(id)}"][data-action="deleteStudent"]`
       );
 
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Deleting...";
+      }
 
-    if (window.showToast) {
+      if (typeof window.showLoading === "function") {
+        window.showLoading("Deleting student...");
+      }
 
-      window.showToast(
-        'Student deleted successfully.',
-        'success'
-      );
+      await remove(ref(db, `students/${id}`));
+
+      window.STUDENTS =
+        (window.STUDENTS || []).filter(
+          item => item.id !== id
+        );
+
+      if (typeof window.showToast === "function") {
+        window.showToast(
+          "Student deleted successfully.",
+          "success"
+        );
+      }
+
+      renderStudents();
+
+      if (typeof window.renderDashboard === "function") {
+        window.renderDashboard();
+      }
+
+    } catch (error) {
+      console.error("Delete student error:", error);
+
+      if (typeof window.showToast === "function") {
+        window.showToast(
+          "Failed to delete student.",
+          "error"
+        );
+      }
+
+    } finally {
+      if (typeof window.hideLoading === "function") {
+        window.hideLoading();
+      }
     }
+  };
 
-
-    renderStudents(
-
-      document.getElementById(
-        'studentFilter'
-      )?.value || 'all',
-
-      document.getElementById(
-        'studentSearch'
-      )?.value || ''
+  if (typeof window.showConfirm === "function") {
+    window.showConfirm(
+      `Are you sure you want to delete ${student.name || "this student"}?`,
+      deleteAction
     );
-
-
-    if (window.renderDashboard) {
-      window.renderDashboard();
-    }
-
-
-  } catch (error) {
-
-    console.error(
-      'Delete student error:',
-      error
-    );
-
-
-    if (window.showToast) {
-
-      window.showToast(
-        'Failed to delete student. Please try again.',
-        'error'
-      );
-    }
-
-
-    if (button) {
-
-      button.disabled = false;
-
-      button.textContent =
-        button.dataset.originalText ||
-        'Delete';
+  } else {
+    if (confirm(
+      `Are you sure you want to delete ${student.name || "this student"}?`
+    )) {
+      await deleteAction();
     }
   }
 }
 
-
 // ============================================================
-// ADD STUDENT PAGE INITIALIZATION
-// ============================================================
-
-function initializeAddStudentPage() {
-
-  const form =
-    document.getElementById('addStudentForm');
-
-  if (!form) return;
-
-
-  form.addEventListener(
-    'submit',
-    event => {
-
-      event.preventDefault();
-
-      addStudent();
-    }
-  );
-
-
-  // ----------------------------------------------------------
-  // AUTO DISPLAY ENROLLMENT ID
-  // ----------------------------------------------------------
-
-  const enrollmentPreview =
-    document.getElementById(
-      'generatedEnrollmentId'
-    );
-
-
-  if (enrollmentPreview) {
-
-    enrollmentPreview.textContent =
-      generateEnrollmentId();
-  }
-}
-
-
-// ============================================================
-// STUDENT LIST EVENT BINDINGS
+// INITIALIZE STUDENT LIST
 // ============================================================
 
 function initializeStudentList() {
-
   const searchInput =
-    document.getElementById(
-      'studentSearch'
-    );
-
-
-  if (searchInput) {
-
-    searchInput.addEventListener(
-      'input',
-      event => {
-
-        const filter =
-          document.getElementById(
-            'studentFilter'
-          )?.value || 'all';
-
-
-        renderStudents(
-          filter,
-          event.target.value
-        );
-      }
-    );
-  }
-
+    document.getElementById("studentSearch");
 
   const filterSelect =
-    document.getElementById(
-      'studentFilter'
-    );
+    document.getElementById("studentFilter");
 
+  const addButton =
+    document.getElementById("addStudentBtn");
+
+  if (addButton) {
+    addButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      window.location.href = "add-student.html";
+    });
+  }
+
+  if (searchInput) {
+    searchInput.addEventListener("input", () => {
+      renderStudents(
+        filterSelect?.value || "all",
+        searchInput.value
+      );
+    });
+  }
 
   if (filterSelect) {
-
-    filterSelect.addEventListener(
-      'change',
-      event => {
-
-        const search =
-          document.getElementById(
-            'studentSearch'
-          )?.value || '';
-
-
-        renderStudents(
-          event.target.value,
-          search
-        );
-      }
-    );
+    filterSelect.addEventListener("change", () => {
+      renderStudents(
+        filterSelect.value,
+        searchInput?.value || ""
+      );
+    });
   }
 
-
-  renderStudents(
-    filterSelect?.value || 'all',
-    searchInput?.value || ''
-  );
+  loadStudents();
 }
 
-
 // ============================================================
-// DOM READY
+// INITIALIZE ADD STUDENT PAGE
 // ============================================================
 
-document.addEventListener(
-  'DOMContentLoaded',
-  () => {
+function initializeAddStudentPage() {
+  const form =
+    document.getElementById("addStudentForm");
 
-    initializeAddStudentPage();
+  if (!form) return;
 
-    initializeStudentList();
+  const academicYearInput =
+    form.querySelector('[name="academicYear"]');
+
+  if (academicYearInput && !academicYearInput.value) {
+    academicYearInput.value = getAcademicYear();
   }
-);
 
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    await addStudent();
+  });
+}
 
 // ============================================================
-// EXPOSE GLOBALLY
+// INITIALIZE EDIT STUDENT PAGE
 // ============================================================
 
-window.renderStudents =
-  renderStudents;
+async function initializeEditStudentPage() {
+  const form =
+    document.getElementById("editStudentForm");
 
-window.addStudent =
-  addStudent;
+  if (!form) return;
 
-window.editStudent =
-  editStudent;
+  const params = new URLSearchParams(
+    window.location.search
+  );
 
-window.updateStudent =
-  updateStudent;
+  const id = params.get("id");
 
-window.deleteStudent =
-  deleteStudent;
+  if (!id) {
+    if (typeof window.showToast === "function") {
+      window.showToast(
+        "Student record ID is missing.",
+        "error"
+      );
+    }
+    return;
+  }
 
-window.generateEnrollmentId =
-  generateEnrollmentId;
-```
+  await loadStudents();
+
+  const student = (window.STUDENTS || []).find(
+    item => item.id === id
+  );
+
+  if (!student) {
+    if (typeof window.showToast === "function") {
+      window.showToast(
+        "Student record not found.",
+        "error"
+      );
+    }
+    return;
+  }
+
+  form.querySelector('[name="name"]')?.setAttribute(
+    "value",
+    student.name || ""
+  );
+
+  const fields = [
+    "admissionNo",
+    "class",
+    "section",
+    "roll",
+    "feeStatus",
+    "mobile",
+    "guardian",
+    "photo",
+    "academicYear"
+  ];
+
+  fields.forEach(field => {
+    const element =
+      form.querySelector(`[name="${field}"]`);
+
+    if (element) {
+      element.value =
+        student[field] ??
+        (field === "academicYear"
+          ? getAcademicYear()
+          : "");
+    }
+  });
+
+  const enrollmentDisplay =
+    document.getElementById("editEnrollmentId");
+
+  if (enrollmentDisplay) {
+    enrollmentDisplay.textContent =
+      student.enrollmentId || "-";
+  }
+
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    await updateStudent(id);
+  });
+}
+
+// ============================================================
+// GLOBAL INITIALIZATION
+// ============================================================
+
+document.addEventListener("DOMContentLoaded", () => {
+  initializeStudentList();
+  initializeAddStudentPage();
+  initializeEditStudentPage();
+});
+
+// ============================================================
+// GLOBAL EXPORTS
+// ============================================================
+
+window.loadStudents = loadStudents;
+window.renderStudents = renderStudents;
+window.generateEnrollmentId = generateEnrollmentId;
+
+window.viewStudent = viewStudent;
+window.addStudent = addStudent;
+window.editStudent = editStudent;
+window.updateStudent = updateStudent;
+window.deleteStudent = deleteStudent;
+
+window.initializeStudentList = initializeStudentList;
+window.initializeAddStudentPage = initializeAddStudentPage;
+window.initializeEditStudentPage = initializeEditStudentPage;
