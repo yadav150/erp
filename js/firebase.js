@@ -1,9 +1,9 @@
-// ============================================================
-// FIREBASE CONFIGURATION & CRUD
-// NEW FIREBASE SDK – MODEL ERP
-// ============================================================
+// firebase.js
+// Central Firebase configuration for the ERP
+// New Firebase SDK + new Admin UID
+// No old Firebase configuration is used.
 
-import { initializeApp, getApps, getApp } from "firebase/app";
+import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
 
 import {
   getDatabase,
@@ -13,7 +13,7 @@ import {
   update,
   remove,
   get
-} from "firebase/database";
+} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
 
 import {
   getAuth,
@@ -21,11 +21,12 @@ import {
   onAuthStateChanged,
   sendPasswordResetEmail,
   signOut
-} from "firebase/auth";
+} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 
-// ============================================================
+
+// ======================================================
 // FIREBASE CONFIGURATION
-// ============================================================
+// ======================================================
 
 const firebaseConfig = {
   apiKey: "AIzaSyCbD7nHFYAKJHVe9eV_JL1A0qHQw",
@@ -38,228 +39,124 @@ const firebaseConfig = {
   measurementId: "G-KT82WYLM0J"
 };
 
-// ============================================================
-// ADMIN USER UID
-// ============================================================
 
-const ADMIN_USER_UID =
-  "089prHaZ5shgPvvaMsl1dgMe6Yx1";
+// ======================================================
+// ADMIN USER
+// ======================================================
 
-// ============================================================
-// INITIALIZE FIREBASE
-// ============================================================
+const ADMIN_USER_UID = "089prHaZ5shgPvvaMsl1dgMe6Yx1";
 
-const app =
-  getApps().length
-    ? getApp()
-    : initializeApp(firebaseConfig);
+
+// ======================================================
+// INITIALIZE FIREBASE SAFELY
+// ======================================================
+
+const app = getApps().length
+  ? getApp()
+  : initializeApp(firebaseConfig);
 
 const db = getDatabase(app);
 const auth = getAuth(app);
 
-// ============================================================
-// AUTHENTICATION
-// ============================================================
+
+// ======================================================
+// ADMIN LOGIN
+// ======================================================
 
 async function loginAdmin(email, password) {
+  const credential = await signInWithEmailAndPassword(
+    auth,
+    email,
+    password
+  );
 
-  const credential =
-    await signInWithEmailAndPassword(
-      auth,
-      email,
-      password
-    );
+  const user = credential.user;
 
-  // Only the configured administrator
-  // can access the ERP admin panel.
-  if (
-    credential.user.uid !==
-    ADMIN_USER_UID
-  ) {
-
+  if (!user || user.uid !== ADMIN_USER_UID) {
     await signOut(auth);
 
-    const error =
-      new Error(
-        "Unauthorized administrator account."
-      );
-
-    error.code =
-      "auth/unauthorized-admin";
+    const error = new Error("Unauthorized admin account.");
+    error.code = "auth/unauthorized-admin";
 
     throw error;
   }
 
-  return credential;
+  return user;
 }
 
-// ============================================================
-// CURRENT AUTHENTICATED USER
-// ============================================================
+
+// ======================================================
+// GET CURRENT ADMIN USER
+// ======================================================
 
 function getCurrentUser() {
+  return new Promise((resolve, reject) => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      unsubscribe();
 
-  return new Promise(resolve => {
+      if (!user) {
+        resolve(null);
+        return;
+      }
 
-    const unsubscribe =
-      onAuthStateChanged(
-        auth,
-        user => {
+      if (user.uid !== ADMIN_USER_UID) {
+        signOut(auth);
+        resolve(null);
+        return;
+      }
 
-          unsubscribe();
-
-          if (
-            user &&
-            user.uid ===
-              ADMIN_USER_UID
-          ) {
-            resolve(user);
-          } else {
-            resolve(null);
-          }
-        },
-        () => {
-
-          unsubscribe();
-          resolve(null);
-
-        }
-      );
-
+      resolve(user);
+    }, reject);
   });
 }
 
-// ============================================================
+
+// ======================================================
 // LOGOUT
-// ============================================================
+// ======================================================
 
-function logoutAdmin() {
-  return signOut(auth);
+async function logoutAdmin() {
+  await signOut(auth);
 }
 
-// ============================================================
+
+// ======================================================
 // PASSWORD RESET
-// ============================================================
+// ======================================================
 
-function sendPasswordReset(email) {
-
-  return sendPasswordResetEmail(
-    auth,
-    email
-  );
+async function sendPasswordReset(email) {
+  return await sendPasswordResetEmail(auth, email);
 }
 
-// ============================================================
+
+// ======================================================
 // GET ALL DATA
-// ============================================================
+// ======================================================
 
-async function getAllData(path) {
+async function getAllData(collection) {
+  const snapshot = await get(ref(db, collection));
 
-  const dbRef =
-    ref(db, path);
-
-  const snapshot =
-    await get(dbRef);
-
-  const data =
-    snapshot.val();
-
-  if (!data) {
+  if (!snapshot.exists()) {
     return [];
   }
 
-  return Object.keys(data).map(
-    key => ({
-      id: key,
-      ...data[key]
-    })
-  );
+  const data = snapshot.val();
+
+  return Object.entries(data).map(([id, value]) => ({
+    id,
+    ...value
+  }));
 }
 
-// ============================================================
-// CREATE DATA
-// ============================================================
 
-async function createData(
-  path,
-  data
-) {
+// ======================================================
+// GET ONE RECORD
+// ======================================================
 
-  const newRef =
-    push(
-      ref(db, path)
-    );
-
-  await set(
-    newRef,
-    data
+async function getOneData(collection, id) {
+  const snapshot = await get(
+    ref(db, `${collection}/${id}`)
   );
-
-  return {
-    id: newRef.key,
-    ...data
-  };
-}
-
-// ============================================================
-// UPDATE DATA
-// ============================================================
-
-function updateData(
-  path,
-  id,
-  data
-) {
-
-  const itemRef =
-    ref(
-      db,
-      `${path}/${id}`
-    );
-
-  return update(
-    itemRef,
-    data
-  );
-}
-
-// ============================================================
-// DELETE DATA
-// ============================================================
-
-function deleteData(
-  path,
-  id
-) {
-
-  const itemRef =
-    ref(
-      db,
-      `${path}/${id}`
-    );
-
-  return remove(
-    itemRef
-  );
-}
-
-// ============================================================
-// GET ONE DATA
-// ============================================================
-
-async function getOneData(
-  path,
-  id
-) {
-
-  const itemRef =
-    ref(
-      db,
-      `${path}/${id}`
-    );
-
-  const snapshot =
-    await get(itemRef);
 
   if (!snapshot.exists()) {
     return null;
@@ -271,22 +168,77 @@ async function getOneData(
   };
 }
 
-// ============================================================
+
+// ======================================================
+// CREATE RECORD
+// ======================================================
+
+async function createData(collection, data) {
+  const collectionRef = ref(db, collection);
+  const newRef = push(collectionRef);
+
+  await set(newRef, {
+    ...data,
+    createdAt: Date.now()
+  });
+
+  return {
+    id: newRef.key,
+    ...data
+  };
+}
+
+
+// ======================================================
+// UPDATE RECORD
+// ======================================================
+
+async function updateData(collection, id, data) {
+  const recordRef = ref(db, `${collection}/${id}`);
+
+  await update(recordRef, {
+    ...data,
+    updatedAt: Date.now()
+  });
+
+  return {
+    id,
+    ...data
+  };
+}
+
+
+// ======================================================
+// DELETE RECORD
+// ======================================================
+
+async function deleteData(collection, id) {
+  await remove(
+    ref(db, `${collection}/${id}`)
+  );
+
+  return true;
+}
+
+
+// ======================================================
 // EXPORTS
-// ============================================================
+// ======================================================
 
 export {
   app,
   db,
   auth,
   ADMIN_USER_UID,
+
   loginAdmin,
   getCurrentUser,
   logoutAdmin,
   sendPasswordReset,
+
   getAllData,
+  getOneData,
   createData,
   updateData,
-  deleteData,
-  getOneData
+  deleteData
 };
